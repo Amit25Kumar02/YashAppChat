@@ -9,27 +9,24 @@ const app = express();
 
 // ✅ Register Route
 app.post("/", async (req, res) => {
-    const { username, email, password } = req.body;
+    const { username, phoneNumber, email, password } = req.body;
 
     try {
         // Check if user already exists
-        const existingUser = await User.findOne({ username });
+        const existingUser = await User.findOne({ phoneNumber });
         if (existingUser) {
             return res.status(400).json({ message: "User already exists" });
         }
-
-        // Hash password
-        // const hashedPassword = await bcrypt.hash(password, 10);
-
         // Save user
         const newUser = new User({
             username,
+            phoneNumber,
             email,
             password,
         });
 
         await newUser.save();
-        res.status(201).json({ message: "✅ User registered successfully" });
+        res.status(200).json({ message: "✅ User registered successfully" });
 
     } catch (error) {
         console.error("❌ Registration error:", error);
@@ -39,12 +36,12 @@ app.post("/", async (req, res) => {
 
 // ✅ Login Route
 app.post("/login", async (req, res) => {
-    const { username, password } = req.body;
+    const { phoneNumber, password } = req.body;
 
     try {
-        const user = await User.findOne({ username });
+        const user = await User.findOne({ phoneNumber });
         if (!user) {
-            return res.status(400).json({ message: "Invalid username" });
+            return res.status(400).json({ message: "Invalid phone number" });
         }
 
         // Check password
@@ -61,6 +58,7 @@ app.post("/login", async (req, res) => {
             user: {
                 userId: user._id,
                 username: user.username,
+                phoneNumber: user.phoneNumber,
             },
         });
 

@@ -1,82 +1,119 @@
-/* Add styles for video call and notification */
+/* === Video Call Container === */
 .video-container {
     position: relative;
-    width: 100%;
+    width: 100vw;
     height: 100vh;
-    background: black;
+    background: #000;
     display: flex;
     justify-content: center;
     align-items: center;
+    overflow: hidden;
 }
 
+/* === Main Video (Remote User) === */
 .remote-video {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    background: #737272; 
 }
 
+/* === Local Video (User's own feed) === */
 .local-video {
     position: absolute;
-    width: 150px;
-    height: 200px;
+    bottom: 25%;
+    right: 5%;
+    width: 20%;
+    height: auto;
+    max-width: 100px;
     border-radius: 10px;
     border: 2px solid white;
     object-fit: cover;
+    z-index: 1;
+    transition: all 0.1s ease-in-out;
     cursor: grab;
-    transition: width 0.3s, height 0.3s;
 }
 
-.local-video:active {
-    cursor: grabbing;
+@media (min-width: 769px) {
+    .local-video {
+        bottom: 5%;
+        right: 2%;
+        width: 15vw;
+        max-width: 250px;
+    }
 }
 
+/* === Controls Bar === */
 .controls {
     position: absolute;
-    bottom: 20px;
+    bottom: 4%;
+    width: 100%;
     display: flex;
     justify-content: center;
-    gap: 10px;
+    gap: 20px;
     z-index: 2;
 }
 
+/* === Icons and Buttons === */
 .icon-btn {
-    background: none;
+    background: rgba(49, 49, 49, 0.8);
     border: none;
-    color: red;
-    font-size: 20px;
+    color: white;
+    font-size: 1.5rem;
     cursor: pointer;
-    padding: 10px;
+    padding: 15px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: background 0.3s ease;
 }
 
 .icon-btn:hover {
-    color: #ffcc00;
+    background: rgba(75, 75, 75, 0.9);
 }
 
+.icon-btn.end-call {
+    background: #ff4747; /* A distinct red for ending the call */
+}
+
+.icon-btn.end-call:hover {
+    background: #ff1a1a;
+}
+
+/* === Notification Banners === */
 .call-notification {
     position: absolute;
-    top: 20px;
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
     background: rgba(0, 0, 0, 0.7);
-    padding: 15px;
+    padding: 20px 30px;
     color: white;
-    border-radius: 5px;
-    font-size: 18px;
+    border-radius: 10px;
+    font-size: 1.2rem;
     font-weight: bold;
+    text-align: center;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
+/* === Online Users/Calling View === */
 .online-users {
     position: absolute;
-    bottom: 50px;
+    bottom: 10%;
+    left: 50%;
+    transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.6);
     padding: 20px;
     color: white;
     border-radius: 8px;
+    text-align: center;
 }
 
 .online-users ul {
     list-style: none;
     padding: 0;
+    margin: 0;
 }
 
 .online-users li {
@@ -84,19 +121,33 @@
 }
 
 .call-button {
-    padding: 10px 20px;
-    background-color: #007bff;
+    padding: 12px 24px;
+    background-color: #075e54;
     border: none;
     color: white;
-    font-size: 18px;
-    border-radius: 5px;
+    font-size: 1rem;
+    border-radius: 25px;
     cursor: pointer;
+    margin-top: 15px;
+    transition: background-color 0.3s ease;
+}
+
+.call-button:hover {
+    background-color: #054c41;
 }
 
 .call-button.accept {
-    background-color: green;
+    background-color: #4cd964;
+}
+
+.call-button.accept:hover {
+    background-color: #38b24a;
 }
 
 .call-button.reject {
-    background-color: red;
+    background-color: #ff4747;
+}
+
+.call-button.reject:hover {
+    background-color: #ff1a1a;
 }

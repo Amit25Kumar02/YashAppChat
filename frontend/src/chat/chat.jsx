@@ -12,7 +12,10 @@ import { useNavigate, Link } from "react-router-dom";
 import profileImage from "../assets/Amit_Photo.jpg";
 import "./css/chat.css";
 
-// Utility function to format the date and time
+// Import audio files
+import ringingSound from "../assets/audio/ring.mp3"; 
+import callingSound from "../assets/audio/calling.mp3";
+
 const formatDate = (dateString) => {
     if (!dateString) return '';
     const date = new Date(dateString);
@@ -51,11 +54,13 @@ const Chat = () => {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const chatRef = useRef(null);
     const navigate = useNavigate();
+    const callingAudio = useRef(new Audio(callingSound));
+    const ringingAudio = useRef(new Audio(ringingSound));
 
-    // New state for mobile responsiveness
     const [showSidebar, setShowSidebar] = useState(true);
+    const [videoCallData, setVideoCallData] = useState(null);
+    const [isCalling, setIsCalling] = useState(false);
 
-    // 1. Fetch user profile and load last active chat on component mount.
     useEffect(() => {
         const token = localStorage.getItem("token");
         if (!token) {
@@ -75,18 +80,49 @@ const Chat = () => {
             .catch(() => navigate("/"));
     }, []);
 
-    // 2. Socket.io general listeners for user status
     useEffect(() => {
         if (userProfile._id) {
             socket.emit("user-online", userProfile._id);
             socket.on("update-user-status", setOnlineUsers);
+            
+            // Listen for incoming call invitations
+            socket.on("call-invitation", ({ from, name }) => {
+                setVideoCallData({ callerId: from, callerName: name });
+                ringingAudio.current.play().catch(e => console.error("Ringing sound error:", e));
+                toast.info(`${name} is calling...`, { autoClose: false, closeButton: false });
+            });
+
+            // Listen for call acceptance and stop sounds
+            socket.on("call-accepted", () => {
+                setIsCalling(true);
+                callingAudio.current.pause();
+                callingAudio.current.currentTime = 0;
+                navigate(`/video/${receiverId}`);
+            });
+            
+            // Listen for call rejection and stop sounds
+            socket.on("call-rejected", () => {
+                setIsCalling(false);
+                callingAudio.current.pause();
+                callingAudio.current.currentTime = 0;
+                setVideoCallData(null);
+                toast.dismiss();
+                toast.info(`${videoCallData?.callerName || "User"} rejected the call.`);
+            });
+            
+            return () => {
+                socket.off("update-user-status");
+                socket.off("call-invitation");
+                socket.off("call-accepted");
+                socket.off("call-rejected");
+                callingAudio.current.pause();
+                callingAudio.current.currentTime = 0;
+                ringingAudio.current.pause();
+                ringingAudio.current.currentTime = 0;
+            };
         }
-        return () => {
-            socket.off("update-user-status");
-        };
     }, [userProfile]);
 
-    // 3. Handle incoming messages and fetch initial messages for a selected chat
     useEffect(() => {
         if (!userProfile._id || !receiverId) return;
 
@@ -124,7 +160,6 @@ const Chat = () => {
         };
     }, [userProfile, receiverId]);
 
-    // 4. Fetch all users
     useEffect(() => {
         const fetchAllUsers = async () => {
             try {
@@ -143,7 +178,6 @@ const Chat = () => {
         }
     }, [userProfile]);
 
-    // 5. Mobile responsiveness logic
     useEffect(() => {
         const handleResize = () => {
             if (window.innerWidth > 768) {
@@ -204,6 +238,40 @@ const Chat = () => {
         }
     };
 
+    const handleVideoCall = () => {
+        if (!receiverId) {
+            toast.error("Please select a user to call.");
+            return;
+        }
+        setIsCalling(true);
+        callingAudio.current.loop = true;
+        callingAudio.current.play().catch(e => console.error("Calling sound error:", e));
+        socket.emit("call-invitation", {
+            to: receiverId,
+            from: userProfile._id,
+            name: userProfile.username
+        });
+        toast.info(`Calling ${receiverName}...`, { autoClose: false, closeButton: false });
+    };
+
+    const acceptCall = () => {
+        setIsCalling(true);
+        ringingAudio.current.pause();
+        ringingAudio.current.currentTime = 0;
+        socket.emit("call-accepted", { to: videoCallData.callerId });
+        navigate(`/video/${videoCallData.callerId}`);
+        toast.dismiss();
+    };
+
+    const rejectCall = () => {
+        ringingAudio.current.pause();
+        ringingAudio.current.currentTime = 0;
+        socket.emit("call-rejected", { to: videoCallData.callerId });
+        setVideoCallData(null);
+        setIsCalling(false);
+        toast.dismiss();
+    };
+
     const handleLogout = () => {
         localStorage.clear();
         setUser(null);
@@ -211,7 +279,6 @@ const Chat = () => {
         toast.info("Logged out");
     };
 
-    // Auto-scroll to the bottom of the chat box.
     useEffect(() => {
         if (chatRef.current) {
             chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -221,10 +288,21 @@ const Chat = () => {
     return (
         <div className="whatsapp-container">
             <ToastContainer />
+            {videoCallData && (
+                <div className="call-notification">
+                    <p>{videoCallData.callerName} is calling you...</p>
+                    <div className="d-flex gap-2">
+                        <button className="call-button accept" onClick={acceptCall}>Accept</button>
+                        <button className="call-button reject" onClick={rejectCall}>Reject</button>
+                    </div>
+                </div>
+            )}
             <div className={`sidebar ${!showSidebar ? 'hide-on-mobile' : ''}`}>
                 <div className="profile-header">
-                    <img src={profileImage} alt="Profile" className="rounded-circle profile-img" />
-                    <span>{userProfile.username}</span>
+                    <div>
+                        <img src={profileImage} alt="Profile" className="rounded-circle profile-img" />
+                        <span>{userProfile.username}</span>
+                    </div>
                     <button className="btn btn-logout" onClick={handleLogout}>
                         <FaSignOutAlt />
                     </button>
@@ -252,14 +330,14 @@ const Chat = () => {
                         )}
                         {receiverId ? getUserAvatar({ username: receiverName }) : <img src={profileImage} alt="Receiver" className="rounded-circle me-2 chat-img" />}
                         <div className="chat-header-info">
-                            <span className="fw-bold">{receiverName || "Select a chat"}</span>
+                            <div className="fw-bold">{receiverName || "Select a chat"}</div>
                             <small className="text-muted">{receiverId && (onlineUsers[receiverId] ? "Online" : "Offline")}</small>
                         </div>
                     </div>
                     {receiverId && (
-                        <Link to={{ pathname: "/video", state: { receiverId, receiverName } }} className="btn btn-video-call">
+                        <button className="btn btn-video-call" onClick={handleVideoCall}>
                             <FaVideo />
-                        </Link>
+                        </button>
                     )}
                 </div>
 

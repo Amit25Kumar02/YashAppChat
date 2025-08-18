@@ -14,7 +14,7 @@ function App() {
                     <Route path="/" element={<Login />} />
                     <Route path="/signup" element={<Signup />} />
                     <Route path="/chat" element={<Chat />} />
-                    <Route path="/video" element={<VideoCall />} />
+                    <Route path="/video/:receiverId" element={<VideoCall />} />
                 </Routes>
             </BrowserRouter>
         </AuthProvider>

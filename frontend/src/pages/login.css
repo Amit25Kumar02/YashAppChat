@@ -9,7 +9,7 @@ body {
     margin: 0;
 }
 
-.signup-container {
+.login-container {
     width: 100%;
     max-width: 450px;
     padding: 20px;
@@ -20,32 +20,31 @@ body {
 }
 
 /* Card Styling */
-.signup-card {
+.login-card {
     background: #ffffff;
-    /* Reduced top and bottom padding for a more compact card */
-    padding: 30px 40px; 
+    padding: 40px;
     border-radius: 12px;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
     width: 100%;
     text-align: center;
 }
 
-.signup-title {
+.login-title {
     font-size: 2rem;
     font-weight: 700;
     color: #333;
-    margin-bottom: 5px; /* Reduced margin */
+    margin-bottom: 10px;
 }
 
-.signup-subtitle {
+.login-subtitle {
     font-size: 1rem;
     color: #888;
-    margin-bottom: 25px; /* Reduced margin */
+    margin-bottom: 30px;
 }
 
 /* Input and Form Styling */
 .input-group-custom {
-    margin-bottom: 15px; /* Reduced margin */
+    margin-bottom: 20px;
     text-align: left;
 }
 
@@ -57,7 +56,7 @@ body {
     font-weight: 600;
 }
 
-.signup-input {
+.login-input {
     width: 100%;
     padding: 12px 15px;
     border: 1px solid #ddd;
@@ -66,7 +65,7 @@ body {
     transition: all 0.3s ease;
 }
 
-.signup-input:focus {
+.login-input:focus {
     outline: none;
     border-color: #007bff;
     box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
@@ -87,7 +86,7 @@ body {
 }
 
 /* Button Styling */
-.signup-button {
+.login-button {
     width: 100%;
     padding: 12px;
     background-color: #007bff;
@@ -101,30 +100,30 @@ body {
     margin-top: 10px;
 }
 
-.signup-button:hover {
+.login-button:hover {
     background-color: #0056b3;
     transform: translateY(-2px);
 }
 
-.signup-button:active {
+.login-button:active {
     transform: translateY(0);
 }
 
 /* Link and Text Styling */
-.login-link {
+.signup-link {
     margin-top: 25px;
     font-size: 0.9rem;
     color: #555;
 }
 
-.login-link a {
+.signup-link a {
     color: #007bff;
     text-decoration: none;
     font-weight: 600;
     transition: color 0.3s ease;
 }
 
-.login-link a:hover {
+.signup-link a:hover {
     color: #0056b3;
 }
 
@@ -135,15 +134,15 @@ body {
 
 /* === Responsive adjustments === */
 @media (max-width: 576px) {
-    .signup-card {
+    .login-card {
         padding: 30px 20px;
     }
 
-    .signup-title {
+    .login-title {
         font-size: 1.7rem;
     }
 
-    .signup-subtitle {
+    .login-subtitle {
         font-size: 0.9rem;
     }
 }

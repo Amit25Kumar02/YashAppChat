@@ -4,6 +4,8 @@ import { useRef, useEffect, useState } from "react";
 import { socket } from "./socket.jsx";
 import "./videocall.css";
 import { FaPhone, FaSync, FaMicrophoneSlash, FaMicrophone, FaVideo, FaVideoSlash, FaTimes } from "react-icons/fa";
+import { useParams, useNavigate } from "react-router-dom";
+import API from "./axiosInstance";
 
 const VideoCall = () => {
     const localVideoRef = useRef(null);
@@ -14,8 +16,32 @@ const VideoCall = () => {
     const [isMuted, setIsMuted] = useState(false);
     const [isSelfViewDragging, setIsSelfViewDragging] = useState(false);
     const [position, setPosition] = useState({ x: 20, y: 20 });
+    const { receiverId } = useParams();
+    const navigate = useNavigate();
+
+    const [callDuration, setCallDuration] = useState(0);
+    const durationIntervalRef = useRef(null);
+    const timeoutRef = useRef(null);
+
+    const [userProfile, setUserProfile] = useState(null);
+    const [isCaller, setIsCaller] = useState(true); // New state to determine if the user is the caller
 
     useEffect(() => {
+        const fetchProfile = async () => {
+            try {
+                const res = await API.get("/auth/me");
+                setUserProfile(res.data);
+            } catch (error) {
+                console.error("Failed to fetch user profile:", error);
+                navigate("/");
+            }
+        };
+        fetchProfile();
+    }, []);
+
+    useEffect(() => {
+        if (!userProfile) return;
+
         peerConnection.current = new RTCPeerConnection({
             iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
         });
@@ -23,36 +49,73 @@ const VideoCall = () => {
         startLocalStream();
 
         peerConnection.current.ontrack = (event) => {
-            remoteVideoRef.current.srcObject = event.streams[0];
+            if (remoteVideoRef.current.srcObject !== event.streams[0]) {
+                remoteVideoRef.current.srcObject = event.streams[0];
+            }
         };
 
         peerConnection.current.onicecandidate = (event) => {
             if (event.candidate) {
-                socket.emit("ice-candidate", event.candidate);
+                socket.emit("ice-candidate", { to: receiverId, candidate: event.candidate });
             }
         };
 
-        socket.on("offer", async (offer) => {
-            await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+        const handleOffer = async ({ from, sdp }) => {
+            setIsCaller(false); // The user is the receiver if they receive an offer
+            await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
             const answer = await peerConnection.current.createAnswer();
             await peerConnection.current.setLocalDescription(answer);
-            socket.emit("answer", answer);
-        });
+            socket.emit("answer", { to: from, sdp: answer });
+            setCallStarted(true);
+        };
 
-        socket.on("answer", async (answer) => {
-            await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
-        });
+        const handleAnswer = async ({ sdp }) => {
+            clearTimeout(timeoutRef.current);
+            await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
+            setCallStarted(true);
+        };
 
-        socket.on("ice-candidate", (candidate) => {
+        const handleIceCandidate = ({ candidate }) => {
             peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-        });
+        };
+
+        const handleCallEnded = () => {
+            if (peerConnection.current) {
+                peerConnection.current.close();
+            }
+            clearInterval(durationIntervalRef.current);
+            navigate("/chat");
+        };
+
+        socket.on("offer", handleOffer);
+        socket.on("answer", handleAnswer);
+        socket.on("ice-candidate", handleIceCandidate);
+        socket.on("call-ended", handleCallEnded);
 
         return () => {
-            socket.off("offer");
-            socket.off("answer");
-            socket.off("ice-candidate");
+            socket.off("offer", handleOffer);
+            socket.off("answer", handleAnswer);
+            socket.off("ice-candidate", handleIceCandidate);
+            socket.off("call-ended", handleCallEnded);
+            if (peerConnection.current) {
+                peerConnection.current.close();
+            }
+            clearInterval(durationIntervalRef.current);
+            clearTimeout(timeoutRef.current);
         };
-    }, []);
+    }, [receiverId, navigate, userProfile]);
+
+    useEffect(() => {
+        if (callStarted) {
+            durationIntervalRef.current = setInterval(() => {
+                setCallDuration(prev => prev + 1);
+            }, 1000);
+        }
+
+        return () => {
+            clearInterval(durationIntervalRef.current);
+        };
+    }, [callStarted]);
 
     const startLocalStream = async () => {
         try {
@@ -62,7 +125,9 @@ const VideoCall = () => {
             };
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
             localVideoRef.current.srcObject = stream;
-            stream.getTracks().forEach(track => peerConnection.current.addTrack(track, stream));
+            stream.getTracks().forEach(track => {
+                peerConnection.current.addTrack(track, stream);
+            });
         } catch (error) {
             console.error("Error accessing camera:", error);
         }
@@ -70,14 +135,48 @@ const VideoCall = () => {
 
     const startCall = async () => {
         if (callStarted) return;
-        setCallStarted(true);
-
+        
         const offer = await peerConnection.current.createOffer();
         await peerConnection.current.setLocalDescription(offer);
-        socket.emit("offer", offer);
+        socket.emit("offer", { to: receiverId, sdp: offer });
+
+        timeoutRef.current = setTimeout(() => {
+            console.log("Call timed out. Assuming missed call.");
+            socket.emit("missedCall", { 
+                callerId: userProfile._id, 
+                receiverId: receiverId 
+            });
+            endCall();
+        }, 30000);
     };
 
-    const flipCamera = () => {
+    const endCall = () => {
+        // Stop the duration timer
+        clearInterval(durationIntervalRef.current);
+        clearTimeout(timeoutRef.current);
+
+        if (userProfile && receiverId) {
+            socket.emit("saveCallHistory", {
+                sender: userProfile._id,
+                receiver: receiverId,
+                content: "Video Call",
+                callDuration: callDuration,
+                callEndedAt: new Date(),
+            });
+        }
+
+        if (peerConnection.current) {
+            peerConnection.current.close();
+        }
+        socket.emit("call-ended", { to: receiverId });
+        navigate("/chat");
+    };
+
+    const flipCamera = async () => {
+        const stream = localVideoRef.current.srcObject;
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
         setIsFrontCamera(prev => !prev);
         startLocalStream();
     };
@@ -85,11 +184,14 @@ const VideoCall = () => {
     const toggleMute = () => {
         const stream = localVideoRef.current.srcObject;
         if (stream) {
-            stream.getAudioTracks().forEach(track => track.enabled = isMuted);
+            const audioTracks = stream.getAudioTracks();
+            if (audioTracks.length > 0) {
+                audioTracks[0].enabled = !audioTracks[0].enabled;
+                setIsMuted(!audioTracks[0].enabled);
+            }
         }
-        setIsMuted(prev => !prev);
     };
-
+    
     const handleDragStart = (e) => {
         setIsSelfViewDragging(true);
     };
@@ -103,29 +205,52 @@ const VideoCall = () => {
         setPosition({ x: e.clientX - 75, y: e.clientY - 50 });
     };
 
+    const formatTime = (seconds) => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return [h, m, s].map(v => v < 10 ? "0" + v : v).filter((v, i) => v !== "00" || i > 0).join(":");
+    };
+
     return (
         <div className="video-container">
-            {/* Receiver Video (Full Screen) */}
             <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline />
-
-            {/* Self Video - Draggable */}
             <video
                 ref={localVideoRef}
                 className="local-video"
                 autoPlay
                 playsInline
+                muted
                 style={{ left: `${position.x}px`, top: `${position.y}px` }}
                 onMouseDown={handleDragStart}
                 onMouseMove={handleDragging}
                 onMouseUp={handleDragEnd}
             />
+            {callStarted && (
+                <div className="call-timer">
+                    <p>{formatTime(callDuration)}</p>
+                </div>
+            )}
 
-            {/* Controls */}
             <div className="controls">
-                <button onClick={startCall} disabled={callStarted} className="icon-btn"><FaPhone /></button>
-                <button onClick={flipCamera} className="icon-btn"><FaSync /></button>
-                <button onClick={toggleMute} className="icon-btn">{isMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}</button>
-                <a href="/chat" className="icon-btn"><FaTimes /></a>
+                {!callStarted && isCaller && (
+                    <button onClick={startCall} className="icon-btn start-call-btn">
+                        <FaPhone />
+                    </button>
+                )}
+                {callStarted && (
+                    <>
+                        <button onClick={endCall} className="icon-btn end-call">
+                            <FaTimes />
+                        </button>
+                        <button onClick={flipCamera} className="icon-btn">
+                            <FaSync />
+                        </button>
+                        <button onClick={toggleMute} className="icon-btn">
+                            {isMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
+                        </button>
+                    </>
+                )}
             </div>
         </div>
     );
