@@ -22,6 +22,7 @@ const VideoCall = () => {
     const [callDuration, setCallDuration] = useState(0);
     const durationIntervalRef = useRef(null);
     const timeoutRef = useRef(null);
+    const earlyCandidates = useRef([]); // A queue to store early ICE candidates
 
     const [userProfile, setUserProfile] = useState(null);
     const [isCaller, setIsCaller] = useState(true);
@@ -46,11 +47,10 @@ const VideoCall = () => {
             iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
         });
 
-        // ✅ This is the crucial change. Ensure ontrack is set up before adding tracks.
         peerConnection.current.ontrack = (event) => {
             if (remoteVideoRef.current.srcObject !== event.streams[0]) {
                 remoteVideoRef.current.srcObject = event.streams[0];
-                setCallStarted(true); // Ensures the receiver view becomes active
+                setCallStarted(true);
             }
         };
 
@@ -59,12 +59,16 @@ const VideoCall = () => {
                 socket.emit("ice-candidate", { to: receiverId, candidate: event.candidate });
             }
         };
-
+        
         const handleOffer = async ({ from, sdp }) => {
             setIsCaller(false);
             await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
-            // Add the local stream tracks before creating the answer
-            startLocalStream(); 
+            // Add any early candidates that might have arrived before the description
+            earlyCandidates.current.forEach(candidate => {
+                peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+            });
+            earlyCandidates.current = []; // Clear the queue
+
             const answer = await peerConnection.current.createAnswer();
             await peerConnection.current.setLocalDescription(answer);
             socket.emit("answer", { to: from, sdp: answer });
@@ -73,11 +77,21 @@ const VideoCall = () => {
         const handleAnswer = async ({ sdp }) => {
             clearTimeout(timeoutRef.current);
             await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
+            // Add any early candidates that might have arrived
+            earlyCandidates.current.forEach(candidate => {
+                peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+            });
+            earlyCandidates.current = []; // Clear the queue
+
             setCallStarted(true);
         };
 
         const handleIceCandidate = ({ candidate }) => {
-            peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+            if (peerConnection.current.remoteDescription) {
+                peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+            } else {
+                earlyCandidates.current.push(candidate);
+            }
         };
 
         const handleCallEnded = () => {
@@ -93,7 +107,6 @@ const VideoCall = () => {
         socket.on("ice-candidate", handleIceCandidate);
         socket.on("call-ended", handleCallEnded);
 
-        // ✅ Also, call startLocalStream() here to ensure the caller's video is ready before starting the call
         startLocalStream();
 
         return () => {
@@ -129,9 +142,13 @@ const VideoCall = () => {
             };
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
             localVideoRef.current.srcObject = stream;
-            // Clear existing tracks before adding new ones
-            const existingTracks = peerConnection.current.getSenders();
-            existingTracks.forEach(sender => peerConnection.current.removeTrack(sender));
+            
+            const existingSenders = peerConnection.current.getSenders();
+            existingSenders.forEach(sender => {
+                if (sender.track && sender.track.kind === "video") {
+                    peerConnection.current.removeTrack(sender);
+                }
+            });
 
             stream.getTracks().forEach(track => {
                 peerConnection.current.addTrack(track, stream);
@@ -216,7 +233,7 @@ const VideoCall = () => {
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
         const s = seconds % 60;
-        return [h, m, s].map(v => v < 10 ? "0" + v : v).filter((v, i) => v !== "00" || i > 0).join(":");
+        return [h, m, s].map(v => v < 10 ? "0" + v : v).join(":");
     };
 
     return (
