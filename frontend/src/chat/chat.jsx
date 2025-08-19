@@ -381,9 +381,7 @@ const Chat = () => {
                         disabled={!receiverId}
                     />
                     <button className="btn btn-primary send-btn" onClick={sendMessage} disabled={!receiverId || !message}>
-                        <svg viewBox="0 0 24 24" width="24" height="24" className="">
-                            <path fill="currentColor" d="M1.101 21.757L23.8 12.028 1.101 2.3zM14.444 12L2.015 20.315 2.5 12 2.015 3.685z"></path>
-                        </svg>
+                       <span className="send-icons">▷</span>
                     </button>
                 </div>
             </div>

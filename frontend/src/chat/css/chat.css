@@ -224,7 +224,7 @@ body {
     background-color: transparent;
     border: none;
     font-size: 24px;
-    color: #919191;
+    color: #000000;
     padding: 0 5px;
     cursor: pointer;
     transition: color 0.2s;
@@ -258,6 +258,9 @@ body {
 .call-notification{
     z-index: 1000;
 }
+.send-icons{
+    font-size: 24px;
+}
 
 .empty-chat-message {
     text-align: center;
@@ -279,7 +282,6 @@ body {
 
     .chat-main {
         width: 100%;
-        /* If not toggled, it will take full width */
     }
 
     .sidebar.hide-on-mobile {
