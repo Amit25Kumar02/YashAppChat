@@ -13,13 +13,31 @@ dotenv.config();
 connectDB();
 
 const app = express();
-app.use(cors());
+
+// Set the allowed origin for CORS
+// IMPORTANT: Replace this with your actual Vercel frontend URL
+const allowedOrigin = 'https://yash-app-chat-application-19.vercel.app';
+
+// Configure CORS middleware for Express
+app.use(cors({
+  origin: allowedOrigin,
+  credentials: true,
+}));
+
 app.use(express.json());
 app.use("/api/auth", require('./routes/authRoutes'));
 app.use("/api/chat", require('./routes/chatRoutes'));
 
 const server = http.createServer(app);
-const io = socketIo(server, { cors: { origin: '*' } });
+
+// Configure Socket.IO to allow connections from the Vercel frontend
+const io = socketIo(server, {
+  cors: {
+    origin: allowedOrigin,
+    methods: ['GET', 'POST'],
+    credentials: true,
+  }
+});
 
 // Correctly manage online users
 const onlineUsers = {};

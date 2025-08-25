@@ -210,6 +210,26 @@ const Chat = () => {
         return () => window.removeEventListener('resize', handleResize);
     }, [receiverId]);
 
+    // This function marks messages as read via API call
+    const markMessagesAsRead = async (senderId) => {
+        try {
+            await axios.put(`${APIURL}/chat/markAsRead`, {
+                sender: senderId,
+                receiver: userProfile._id
+            }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem("token")}`,
+                },
+            });
+            // Update the local messages state to reflect the change
+            setMessages(prev => prev.map(msg => 
+                msg.sender === senderId ? { ...msg, read: true } : msg
+            ));
+        } catch (error) {
+            console.error("Failed to mark messages as read:", error);
+        }
+    };
+
     const handleSelectChat = (selectedUser) => {
         localStorage.setItem("lastReceiverId", selectedUser._id);
         localStorage.setItem("lastReceiverName", selectedUser.username);
@@ -217,6 +237,11 @@ const Chat = () => {
         setReceiverId(selectedUser._id);
         setReceiverName(selectedUser.username);
         setShowSidebar(false);
+        
+        // Mark messages as read when a chat is selected
+        if (userProfile._id && selectedUser._id) {
+            markMessagesAsRead(selectedUser._id);
+        }
     };
 
     const handleBackClick = () => {
