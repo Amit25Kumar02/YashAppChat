@@ -11,9 +11,10 @@ import 'react-toastify/dist/ReactToastify.css';
 import { useNavigate, Link } from "react-router-dom";
 import profileImage from "../assets/Amit_Photo.jpg";
 import "./css/chat.css";
+import { BiCheckDouble } from 'react-icons/bi'; // Import the check double icon
 
 // Import audio files
-import ringingSound from "../assets/audio/ring.mp3"; 
+import ringingSound from "../assets/audio/ring.mp3";
 import callingSound from "../assets/audio/calling.mp3";
 
 // const APIURL = "http://localhost:4000/api";
@@ -112,11 +113,21 @@ const Chat = () => {
                 toast.info(`${videoCallData?.callerName || "User"} rejected the call.`);
             });
             
+            // New listener for when a message is marked as read
+            socket.on("messageRead", (updatedMessage) => {
+                setMessages(prev => 
+                    prev.map(msg => 
+                        msg._id === updatedMessage._id ? { ...msg, read: updatedMessage.read } : msg
+                    )
+                );
+            });
+
             return () => {
                 socket.off("update-user-status");
                 socket.off("call-invitation");
                 socket.off("call-accepted");
                 socket.off("call-rejected");
+                socket.off("messageRead"); // Clean up the new listener
                 callingAudio.current.pause();
                 callingAudio.current.currentTime = 0;
                 ringingAudio.current.pause();
@@ -143,15 +154,21 @@ const Chat = () => {
         };
 
         const handleReceiveMessage = (data) => {
-            // Only add the message if it's from the other user
-            if (data.sender !== userProfile._id) {
-                setMessages(prev => {
-                    if (data.sender === receiverId || data.receiver === receiverId) {
-                        return [...prev, data];
+            if (data.sender === receiverId && data.receiver === userProfile._id) {
+                // Mark the received message as read on the backend
+                axios.put(`${APIURL}/chat/read/${data._id}`, {}, {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem("token")}`
                     }
-                    return prev;
-                });
+                }).catch(err => console.error("Failed to mark message as read:", err));
             }
+
+            setMessages(prev => {
+                if (data.sender === receiverId || data.receiver === receiverId) {
+                    return [...prev, data];
+                }
+                return prev;
+            });
         };
 
         socket.on("receiveMessage", handleReceiveMessage);
@@ -369,7 +386,15 @@ const Chat = () => {
                                 ) : (
                                     <p>{msg.content}</p>
                                 )}
-                                <span className="message-time">{formatDate(msg.createdAt)}</span>
+                                <div className="message-status-container">
+                                    <span className="message-time">{formatDate(msg.createdAt)}</span>
+                                    {/* Display read ticks only for sent messages */}
+                                    {msg.sender === userProfile._id && (
+                                        <BiCheckDouble 
+                                            className={`read-receipt-tick ${msg.read ? 'read-blue' : 'unread-gray'}`} 
+                                        />
+                                    )}
+                                </div>
                             </div>
                         </div>
                     ))}

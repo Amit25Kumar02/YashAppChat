@@ -7,7 +7,33 @@ body {
     margin: 0;
     padding: 0;
 }
+/* Add to your existing chat.css file */
 
+.message-status-container {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px; /* Adjust spacing as needed */
+}
+
+.read-receipt-tick {
+  font-size: 1.2rem;
+}
+
+.unread-gray {
+  color: #ccc; /* Light gray for unread */
+}
+
+.read-blue {
+  color: #007bff; /* Blue for read */
+}
+
+/* Optional: Adjust sent message bubble to better align the status */
+.message-bubble.sent .message-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end; /* Align content to the right */
+}
 .whatsapp-container {
     display: flex;
     height: 100vh;
