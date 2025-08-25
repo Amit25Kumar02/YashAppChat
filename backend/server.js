@@ -6,20 +6,39 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const connectDB = require('./db');
 const Message = require('./models/Message');
-const Group = require('./models/Group');
 const User = require('./models/User');
 
 dotenv.config();
 connectDB();
 
 const app = express();
-app.use(cors());
+
+// --- START: CORS Configuration Fix ---
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? ['https://yash-app-chat-application-19.vercel.app']
+  : ['http://localhost:5173', 'http://localhost:3000']; 
+
+// Express CORS for HTTP requests (like /api/auth/login)
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+}));
+// --- END: CORS Configuration Fix ---
+
 app.use(express.json());
 app.use("/api/auth", require('./routes/authRoutes'));
 app.use("/api/chat", require('./routes/chatRoutes'));
 
 const server = http.createServer(app);
-const io = socketIo(server, { cors: { origin: '*' } });
+
+// Socket.IO CORS for WebSocket connections
+const io = socketIo(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true,
+  }
+});
 
 // Correctly manage online users
 const onlineUsers = {};
@@ -27,12 +46,11 @@ const onlineUsers = {};
 io.on("connection", (socket) => {
     console.log("🟢 Socket connected:", socket.id);
 
-    // This event should be the only way to map a user ID to a socket ID
     socket.on("user-online", async (userId) => {
         try {
             const user = await User.findByIdAndUpdate(userId, { online: true }, { new: true });
             if (user) {
-                onlineUsers[user._id] = socket.id; // Use the onlineUsers map
+                onlineUsers[user._id] = socket.id;
                 io.emit("update-user-status", onlineUsers);
             }
         } catch (err) {
@@ -40,77 +58,59 @@ io.on("connection", (socket) => {
         }
     });
 
-    // === WebRTC Signaling Events (New) ===
-    
-    // 1. A client wants to initiate a call
+    // --- START: Message Logic Fix ---
+    // The server no longer saves the message.
+    // The message is saved by a separate HTTP POST request from the frontend.
+    // This event only broadcasts the message to the receiver.
+    socket.on("sendMessage", (messageData) => {
+        const receiverSocketId = onlineUsers[messageData.receiver];
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("receiveMessage", messageData);
+        }
+    });
+    // --- END: Message Logic Fix ---
+
+    // === Existing WebRTC Signaling Events ===
     socket.on('call-invitation', ({ to, from, name }) => {
         const receiverSocketId = onlineUsers[to];
         if (receiverSocketId) {
             io.to(receiverSocketId).emit('call-invitation', { from, name });
         }
     });
-
-    // 2. The caller sends an SDP offer
     socket.on('offer', ({ to, sdp }) => {
         const receiverSocketId = onlineUsers[to];
         if (receiverSocketId) {
             io.to(receiverSocketId).emit('offer', { from: socket.id, sdp });
         }
     });
-
-    // 3. The receiver sends an SDP answer
     socket.on('answer', ({ to, sdp }) => {
         const callerSocketId = onlineUsers[to];
         if (callerSocketId) {
             io.to(callerSocketId).emit('answer', { sdp });
         }
     });
-
-    // 4. Clients exchange ICE candidates
     socket.on('ice-candidate', ({ to, candidate }) => {
         const otherUserSocketId = onlineUsers[to];
         if (otherUserSocketId) {
             io.to(otherUserSocketId).emit('ice-candidate', { candidate });
         }
     });
-
-    // 5. The receiver accepts the call
     socket.on('call-accepted', ({ to }) => {
         const callerSocketId = onlineUsers[to];
         if (callerSocketId) {
             io.to(callerSocketId).emit('call-accepted');
         }
     });
-
-    // 6. A client rejects or ends the call
     socket.on('call-rejected', ({ to }) => {
         const callerSocketId = onlineUsers[to];
         if (callerSocketId) {
             io.to(callerSocketId).emit('call-rejected');
         }
     });
-    
     socket.on('call-ended', ({ to }) => {
         const otherUserSocketId = onlineUsers[to];
         if (otherUserSocketId) {
             io.to(otherUserSocketId).emit('call-ended');
-        }
-    });
-
-    // === Existing Chat Events ===
-
-    socket.on("sendMessage", async ({ sender, receiver, content, type = "text" }) => {
-        try {
-            const msg = new Message({ sender, receiver, content, type, read: false });
-            await msg.save();
-            const receiverSocketId = onlineUsers[receiver];
-            if (receiverSocketId) {
-                io.to(receiverSocketId).emit("receiveMessage", msg);
-            } else {
-                // Handle offline messages
-            }
-        } catch (err) {
-            console.error("❌ Message send error:", err);
         }
     });
 

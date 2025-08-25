@@ -19,6 +19,7 @@ import callingSound from "../assets/audio/calling.mp3";
 // const APIURL = "http://localhost:4000/api";
 const APIURL = "https://yashapp-chat-application.onrender.com/api";
 
+const generateTempId = () => Date.now().toString() + Math.random().toString(36).substr(2, 9);
 
 const formatDate = (dateString) => {
     if (!dateString) return '';
@@ -89,14 +90,12 @@ const Chat = () => {
             socket.emit("user-online", userProfile._id);
             socket.on("update-user-status", setOnlineUsers);
             
-            // Listen for incoming call invitations
             socket.on("call-invitation", ({ from, name }) => {
                 setVideoCallData({ callerId: from, callerName: name });
                 ringingAudio.current.play().catch(e => console.error("Ringing sound error:", e));
                 toast.info(`${name} is calling...`, { autoClose: false, closeButton: false });
             });
 
-            // Listen for call acceptance and stop sounds
             socket.on("call-accepted", () => {
                 setIsCalling(true);
                 callingAudio.current.pause();
@@ -104,7 +103,6 @@ const Chat = () => {
                 navigate(`/video/${receiverId}`);
             });
             
-            // Listen for call rejection and stop sounds
             socket.on("call-rejected", () => {
                 setIsCalling(false);
                 callingAudio.current.pause();
@@ -145,14 +143,14 @@ const Chat = () => {
         };
 
         const handleReceiveMessage = (data) => {
-            setMessages(prev => {
-                if (data.sender === receiverId || data.receiver === receiverId) {
-                    return [...prev, data];
-                }
-                return prev;
-            });
-            if (data.sender === receiverId) {
-                socket.emit("markAsRead", { sender: data.sender, receiver: userProfile._id });
+            // Only add the message if it's from the other user
+            if (data.sender !== userProfile._id) {
+                setMessages(prev => {
+                    if (data.sender === receiverId || data.receiver === receiverId) {
+                        return [...prev, data];
+                    }
+                    return prev;
+                });
             }
         };
 
@@ -214,12 +212,14 @@ const Chat = () => {
         setReceiverName("");
         setMessages([]);
     };
-
+    
     const sendMessage = async () => {
         if (!message || !receiverId) {
             toast.error("Please select a user and type a message.");
             return;
         }
+        
+        const tempId = generateTempId();
         const data = {
             sender: userProfile._id,
             receiver: receiverId,
@@ -227,18 +227,28 @@ const Chat = () => {
             type: "text",
             createdAt: new Date().toISOString(),
         };
+
+        setMessages((prev) => [...prev, { ...data, _id: tempId }]);
+        setMessage("");
+
         try {
-            await axios.post(`${APIURL}/chat/send`, data, {
+            const res = await axios.post(`${APIURL}/chat/send`, data, {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem("token")}`,
                 },
             });
-            socket.emit("sendMessage", data);
-            setMessages((prev) => [...prev, data]);
-            setMessage("");
-            setShowEmojiPicker(false);
-        } catch {
+            const savedMessage = res.data;
+
+            setMessages((prev) => 
+                prev.map((msg) => (msg._id === tempId ? savedMessage : msg))
+            );
+
+            socket.emit("sendMessage", savedMessage);
+            
+        } catch (error) {
+            console.error("Message send failed:", error);
             toast.error("Message send failed");
+            setMessages((prev) => prev.filter((msg) => msg._id !== tempId));
         }
     };
 
