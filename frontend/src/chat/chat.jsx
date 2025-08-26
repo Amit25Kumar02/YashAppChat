@@ -8,10 +8,12 @@ import EmojiPicker from "emoji-picker-react";
 import { FaSignOutAlt, FaVideo, FaSmile, FaArrowLeft } from "react-icons/fa";
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import profileImage from "../assets/Amit_Photo.jpg";
 import "./css/chat.css";
-import { BiCheckDouble } from 'react-icons/bi';
+import { BiCheckDouble } from 'react-icons/bi'; // Import the check double icon
+
+// Import audio files
 import ringingSound from "../assets/audio/ring.mp3";
 import callingSound from "../assets/audio/calling.mp3";
 
@@ -59,10 +61,11 @@ const Chat = () => {
     const navigate = useNavigate();
     const callingAudio = useRef(new Audio(callingSound));
     const ringingAudio = useRef(new Audio(ringingSound));
+
     const [showSidebar, setShowSidebar] = useState(true);
     const [videoCallData, setVideoCallData] = useState(null);
+    const [isCalling, setIsCalling] = useState(false);
 
-    // Initial user and authentication check
     useEffect(() => {
         const token = localStorage.getItem("token");
         if (!token) {
@@ -80,9 +83,8 @@ const Chat = () => {
                 }
             })
             .catch(() => navigate("/"));
-    }, [navigate]);
+    }, []);
 
-    // Socket listeners for online status and video calls
     useEffect(() => {
         if (!userProfile._id) return;
 
@@ -99,14 +101,18 @@ const Chat = () => {
 
         socket.on("call-accepted", () => {
             console.log("Caller: Call accepted by receiver. Navigating to video call...");
+            setIsCalling(true);
             callingAudio.current.pause();
             callingAudio.current.currentTime = 0;
             toast.dismiss('call');
+            // Check the receiverId here. It should be the ID of the person you called.
+            console.log("Caller's receiverId:", receiverId);
             navigate(`/video/${receiverId}`);
         });
 
         socket.on("call-rejected", () => {
             console.log("Caller: Call rejected by receiver.");
+            setIsCalling(false);
             callingAudio.current.pause();
             callingAudio.current.currentTime = 0;
             toast.dismiss('call');
@@ -135,7 +141,6 @@ const Chat = () => {
         };
     }, [userProfile, receiverId]);
 
-    // Fetch messages and listen for new messages
     useEffect(() => {
         if (!userProfile._id || !receiverId) return;
 
@@ -163,7 +168,6 @@ const Chat = () => {
             }
 
             setMessages(prev => {
-                // Check if the new message is for the currently selected chat
                 if (data.sender === receiverId || data.receiver === receiverId) {
                     return [...prev, data];
                 }
@@ -179,7 +183,6 @@ const Chat = () => {
         };
     }, [userProfile, receiverId]);
 
-    // Fetch all users
     useEffect(() => {
         const fetchAllUsers = async () => {
             try {
@@ -198,13 +201,16 @@ const Chat = () => {
         }
     }, [userProfile]);
 
-    // Handle mobile layout
     useEffect(() => {
         const handleResize = () => {
             if (window.innerWidth > 768) {
                 setShowSidebar(true);
             } else {
-                setShowSidebar(!receiverId);
+                if (receiverId) {
+                    setShowSidebar(false);
+                } else {
+                    setShowSidebar(true);
+                }
             }
         };
         window.addEventListener('resize', handleResize);
@@ -219,9 +225,7 @@ const Chat = () => {
         setReceiver(selectedUser.username);
         setReceiverId(selectedUser._id);
         setReceiverName(selectedUser.username);
-        if (window.innerWidth <= 768) {
-            setShowSidebar(false);
-        }
+        setShowSidebar(false);
     };
 
     const handleBackClick = () => {
@@ -246,7 +250,7 @@ const Chat = () => {
             createdAt: new Date().toISOString(),
         };
 
-        setMessages((prev) => [...prev, { ...data, _id: tempId, read: false, temp: true }]);
+        setMessages((prev) => [...prev, { ...data, _id: tempId }]);
         setMessage("");
 
         try {
@@ -262,6 +266,7 @@ const Chat = () => {
             );
 
             socket.emit("sendMessage", savedMessage);
+
         } catch (error) {
             console.error("Message send failed:", error);
             toast.error("Message send failed");
@@ -275,6 +280,7 @@ const Chat = () => {
             return;
         }
         console.log("Caller: Initiating call to receiverId:", receiverId);
+        setIsCalling(true);
         callingAudio.current.loop = true;
         callingAudio.current.play().catch(e => console.error("Calling sound error:", e));
         socket.emit("call-invitation", {
@@ -287,12 +293,12 @@ const Chat = () => {
 
     const acceptCall = () => {
         console.log("Receiver: Accepting call from callerId:", videoCallData.callerId);
+        setIsCalling(true);
         ringingAudio.current.pause();
         ringingAudio.current.currentTime = 0;
-        socket.emit("call-accepted", { to: videoCallData.callerId });
+        socket.emit("call-accepted", { to: videoCallData.callerId, callerId: videoCallData.callerId });
         navigate(`/video/${videoCallData.callerId}`);
         toast.dismiss('call');
-        setVideoCallData(null); // Clear video call data
     };
 
     const rejectCall = () => {
@@ -301,6 +307,7 @@ const Chat = () => {
         ringingAudio.current.currentTime = 0;
         socket.emit("call-rejected", { to: videoCallData.callerId });
         setVideoCallData(null);
+        setIsCalling(false);
         toast.dismiss('call');
     };
 
