@@ -3,296 +3,271 @@ import { useRef, useEffect, useState } from "react";
 import { socket } from "./socket";
 import "./videocall.css";
 import {
-  FaPhone,
-  FaSync,
-  FaMicrophoneSlash,
-  FaMicrophone,
-  FaTimes,
+    FaPhone,
+    FaSync,
+    FaMicrophoneSlash,
+    FaMicrophone,
+    FaTimes,
+    FaVideoSlash,
+    FaVideo,
 } from "react-icons/fa";
 import { useParams, useNavigate } from "react-router-dom";
 import API from "./axiosInstance";
+import { toast } from "react-toastify";
 
 const VideoCall = () => {
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const peerConnection = useRef(null);
-  const [callEstablished, setCallEstablished] = useState(false);
-  const [isFrontCamera, setIsFrontCamera] = useState(true);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSelfViewDragging, setIsSelfViewDragging] = useState(false);
-  const [position, setPosition] = useState({ x: 20, y: 20 });
-  const { receiverId } = useParams();
-  const navigate = useNavigate();
+    const localVideoRef = useRef(null);
+    const remoteVideoRef = useRef(null);
+    const peerConnection = useRef(null);
+    const localStream = useRef(null);
 
-  const [callDuration, setCallDuration] = useState(0);
-  const durationIntervalRef = useRef(null);
-  const timeoutRef = useRef(null);
-  const earlyCandidates = useRef([]);
+    const [callEstablished, setCallEstablished] = useState(false);
+    const [isFrontCamera, setIsFrontCamera] = useState(true);
+    const [isMuted, setIsMuted] = useState(false);
+    const [isSelfViewDragging, setIsSelfViewDragging] = useState(false);
+    const [position, setPosition] = useState({ x: 20, y: 20 });
+    const { receiverId } = useParams();
+    const navigate = useNavigate();
 
-  const [userProfile, setUserProfile] = useState(null);
-  const [isCaller, setIsCaller] = useState(true);
+    const [callDuration, setCallDuration] = useState(0);
+    const durationIntervalRef = useRef(null);
+    const earlyCandidates = useRef([]);
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const res = await API.get("/auth/me");
-        setUserProfile(res.data);
-      } catch (error) {
-        console.error("Failed to fetch user profile:", error);
-        navigate("/");
-      }
-    };
-    fetchProfile();
-  }, []);
+    const [isCaller, setIsCaller] = useState(true);
+    const [isCameraOff, setIsCameraOff] = useState(false);
 
-  useEffect(() => {
-    if (!userProfile) return;
-
-    peerConnection.current = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-
-    peerConnection.current.ontrack = (event) => {
-      console.log("Remote stream received:", event.streams[0]);
-      if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== event.streams[0]) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-        remoteVideoRef.current.play().catch(e => console.error("Remote play error:", e));
-        setCallEstablished(true);
-      }
-    };
-
-    peerConnection.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit("ice-candidate", {
-          to: receiverId,
-          candidate: event.candidate,
+    useEffect(() => {
+        // Create PeerConnection instance
+        peerConnection.current = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
-      }
-    };
 
-    const handleOffer = async ({ from, sdp }) => {
-      console.log("Received offer:", sdp);
-      setIsCaller(false);
-      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
-      earlyCandidates.current.forEach((candidate) => {
-        peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-      });
-      earlyCandidates.current = [];
+        peerConnection.current.ontrack = (event) => {
+            console.log("Remote stream received:", event.streams[0]);
+            if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== event.streams[0]) {
+                remoteVideoRef.current.srcObject = event.streams[0];
+                setCallEstablished(true);
+            }
+        };
 
-      const answer = await peerConnection.current.createAnswer();
-      await peerConnection.current.setLocalDescription(answer);
-      socket.emit("answer", { to: from, sdp: answer });
-      setCallEstablished(true);
-    };
+        peerConnection.current.onicecandidate = (event) => {
+            if (event.candidate) {
+                console.log("Sending ICE candidate:", event.candidate);
+                socket.emit("ice-candidate", {
+                    to: receiverId,
+                    candidate: event.candidate,
+                });
+            }
+        };
 
-    const handleAnswer = async ({ sdp }) => {
-      console.log("Received answer:", sdp);
-      clearTimeout(timeoutRef.current);
-      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
-      earlyCandidates.current.forEach((candidate) => {
-        peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-      });
-      earlyCandidates.current = [];
-    };
+        const handleOffer = async ({ from, sdp }) => {
+            console.log("Received offer:", sdp);
+            setIsCaller(false);
+            await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
+            earlyCandidates.current.forEach((candidate) => {
+                peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+            });
+            earlyCandidates.current = [];
 
-    const handleIceCandidate = ({ candidate }) => {
-      console.log("Received ICE candidate:", candidate);
-      if (peerConnection.current.remoteDescription) {
-        peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-      } else {
-        earlyCandidates.current.push(candidate);
-      }
-    };
+            const answer = await peerConnection.current.createAnswer();
+            await peerConnection.current.setLocalDescription(answer);
+            socket.emit("answer", { to: from, sdp: answer });
+        };
 
-    const handleCallEnded = () => {
-      console.log("Call ended by peer.");
-      endCall();
-    };
+        const handleAnswer = async ({ sdp }) => {
+            console.log("Received answer:", sdp);
+            await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
+            earlyCandidates.current.forEach((candidate) => {
+                peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+            });
+            earlyCandidates.current = [];
+            setCallEstablished(true); // <-- FIX: Trigger the timer when the answer is received
+        };
 
-    socket.on("offer", handleOffer);
-    socket.on("answer", handleAnswer);
-    socket.on("ice-candidate", handleIceCandidate);
-    socket.on("call-ended", handleCallEnded);
+        const handleIceCandidate = ({ candidate }) => {
+            console.log("Received ICE candidate:", candidate);
+            if (peerConnection.current.remoteDescription) {
+                peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+            } else {
+                earlyCandidates.current.push(candidate);
+            }
+        };
 
-    startLocalStream();
+        const handleCallEnded = () => {
+            console.log("Call ended by peer.");
+            toast.info("Call ended by other user.");
+            endCall();
+        };
 
-    return () => {
-      socket.off("offer", handleOffer);
-      socket.off("answer", handleAnswer);
-      socket.off("ice-candidate", handleIceCandidate);
-      socket.off("call-ended", handleCallEnded);
-      if (peerConnection.current) {
-        peerConnection.current.close();
-      }
-      clearInterval(durationIntervalRef.current);
-      clearTimeout(timeoutRef.current);
-    };
-  }, [receiverId, navigate, userProfile]);
+        socket.on("offer", handleOffer);
+        socket.on("answer", handleAnswer);
+        socket.on("ice-candidate", handleIceCandidate);
+        socket.on("call-ended", handleCallEnded);
 
-  useEffect(() => {
-    if (callEstablished) {
-      durationIntervalRef.current = setInterval(() => {
-        setCallDuration((prev) => prev + 1);
-      }, 1000);
-    }
+        startLocalStream();
 
-    return () => {
-      clearInterval(durationIntervalRef.current);
-    };
-  }, [callEstablished]);
+        return () => {
+            socket.off("offer", handleOffer);
+            socket.off("answer", handleAnswer);
+            socket.off("ice-candidate", handleIceCandidate);
+            socket.off("call-ended", handleCallEnded);
+            endCall();
+        };
+    }, [receiverId, navigate]);
 
-  const startLocalStream = async () => {
-    try {
-      const constraints = {
-        video: { facingMode: isFrontCamera ? "user" : "environment" },
-        audio: true,
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      localVideoRef.current.srcObject = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.play().catch(e => console.error("Local play error:", e));
-      }
-
-      // Add tracks to the peer connection
-      const existingSenders = peerConnection.current.getSenders();
-      existingSenders.forEach(sender => {
-        if (sender.track) {
-          peerConnection.current.removeTrack(sender);
+    useEffect(() => {
+        if (callEstablished) {
+            durationIntervalRef.current = setInterval(() => {
+                setCallDuration((prev) => prev + 1);
+            }, 1000);
+        } else {
+            clearInterval(durationIntervalRef.current);
+            setCallDuration(0);
         }
-      });
-      stream.getTracks().forEach((track) => {
-        peerConnection.current.addTrack(track, stream);
-      });
-    } catch (error) {
-      console.error("Error accessing camera:", error);
-    }
-  };
+        return () => clearInterval(durationIntervalRef.current);
+    }, [callEstablished]);
 
-  const startCall = async () => {
-    if (callEstablished) return;
+    const startLocalStream = async () => {
+        try {
+            if (localStream.current) {
+                localStream.current.getTracks().forEach(track => track.stop());
+            }
+            const constraints = {
+                video: { facingMode: isFrontCamera ? "user" : "environment" },
+                audio: true,
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            localStream.current = stream;
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = stream;
+            }
 
-    // Await for tracks to be added before creating offer
-    await new Promise(resolve => setTimeout(resolve, 500));
+            peerConnection.current.getSenders().forEach(sender => {
+                if (sender.track) peerConnection.current.removeTrack(sender);
+            });
+            stream.getTracks().forEach((track) => {
+                peerConnection.current.addTrack(track, stream);
+            });
+        } catch (error) {
+            console.error("Error accessing camera:", error);
+            toast.error("Could not access camera/microphone.");
+        }
+    };
 
-    const offer = await peerConnection.current.createOffer();
-    await peerConnection.current.setLocalDescription(offer);
-    socket.emit("offer", { to: receiverId, sdp: offer });
+    const startCall = async () => {
+        console.log("Starting call...");
+        if (!localStream.current) {
+            await startLocalStream();
+        }
 
-    timeoutRef.current = setTimeout(() => {
-      console.log("Call timed out. Assuming missed call.");
-      socket.emit("missedCall", {
-        callerId: userProfile._id,
-        receiverId: receiverId,
-      });
-      endCall();
-    }, 30000);
-  };
+        const offer = await peerConnection.current.createOffer();
+        await peerConnection.current.setLocalDescription(offer);
+        socket.emit("offer", { to: receiverId, sdp: offer });
+    };
 
-  const endCall = () => {
-    clearInterval(durationIntervalRef.current);
-    clearTimeout(timeoutRef.current);
-    setCallEstablished(false);
+    const endCall = () => {
+        if (peerConnection.current) {
+            peerConnection.current.getSenders().forEach(sender => {
+                if (sender.track) sender.track.stop();
+            });
+            peerConnection.current.close();
+            peerConnection.current = null;
+        }
+        if (localStream.current) {
+            localStream.current.getTracks().forEach(track => track.stop());
+        }
+        setCallEstablished(false);
+        socket.emit("call-ended", { to: receiverId });
+        navigate("/chat");
+    };
 
-    if (userProfile && receiverId) {
-      socket.emit("saveCallHistory", {
-        sender: userProfile._id,
-        receiver: receiverId,
-        content: "Video Call",
-        callDuration: callDuration,
-        callEndedAt: new Date(),
-      });
-    }
+    const flipCamera = async () => {
+        setIsFrontCamera((prev) => !prev);
+        startLocalStream();
+    };
 
-    if (peerConnection.current) {
-      peerConnection.current.close();
-      peerConnection.current = null;
-    }
-    socket.emit("call-ended", { to: receiverId });
-    navigate("/chat");
-  };
+    const toggleMute = () => {
+        const audioTracks = localStream.current?.getAudioTracks();
+        if (audioTracks?.length > 0) {
+            const isCurrentlyMuted = !audioTracks[0].enabled;
+            audioTracks[0].enabled = isCurrentlyMuted;
+            setIsMuted(isCurrentlyMuted);
+        }
+    };
 
-  const flipCamera = async () => {
-    const stream = localVideoRef.current?.srcObject;
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
+    const toggleCamera = () => {
+        const videoTracks = localStream.current?.getVideoTracks();
+        if (videoTracks?.length > 0) {
+            const isCurrentlyOff = !videoTracks[0].enabled;
+            videoTracks[0].enabled = isCurrentlyOff;
+            setIsCameraOff(isCurrentlyOff);
+        }
+    };
 
-    setIsFrontCamera((prev) => !prev);
-    startLocalStream();
-  };
+    const handleDragStart = (e) => {
+        e.preventDefault();
+        setIsSelfViewDragging(true);
+    };
 
-  const toggleMute = () => {
-    const stream = localVideoRef.current.srcObject;
-    if (stream) {
-      const audioTracks = stream.getAudioTracks();
-      if (audioTracks.length > 0) {
-        audioTracks[0].enabled = !audioTracks[0].enabled;
-        setIsMuted(!audioTracks[0].enabled);
-      }
-    }
-  };
+    const handleDragEnd = () => {
+        setIsSelfViewDragging(false);
+    };
 
-  const handleDragStart = (e) => {
-    e.preventDefault();
-    setIsSelfViewDragging(true);
-  };
+    const handleDragging = (e) => {
+        if (!isSelfViewDragging) return;
+        setPosition({ x: e.clientX, y: e.clientY });
+    };
 
-  const handleDragEnd = () => {
-    setIsSelfViewDragging(false);
-  };
+    const formatTime = (seconds) => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return [h, m, s].map((v) => (v < 10 ? "0" + v : v)).join(":");
+    };
 
-  const handleDragging = (e) => {
-    if (!isSelfViewDragging) return;
-    setPosition({ x: e.clientX, y: e.clientY });
-  };
+    return (
+        <div className="video-container" onMouseMove={handleDragging} onMouseUp={handleDragEnd}>
+            <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline />
+            <video
+                ref={localVideoRef}
+                className="local-video"
+                autoPlay
+                playsInline
+                muted
+                style={{ left: `${position.x - 75}px`, top: `${position.y - 50}px` }}
+                onMouseDown={handleDragStart}
+            />
+            {callEstablished && (
+                <div className="call-timer">
+                    <p>{formatTime(callDuration)}</p>
+                </div>
+            )}
 
-  const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return [h, m, s].map((v) => (v < 10 ? "0" + v : v)).join(":");
-  };
-
-  return (
-    <div className="video-container" onMouseMove={handleDragging} onMouseUp={handleDragEnd}>
-      <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline />
-      <video
-        ref={localVideoRef}
-        className="local-video"
-        autoPlay
-        playsInline
-        muted
-        style={{ left: `${position.x - 75}px`, top: `${position.y - 50}px` }}
-        onMouseDown={handleDragStart}
-      />
-      {callEstablished && (
-        <div className="call-timer">
-          <p>{formatTime(callDuration)}</p>
+            <div className="controls">
+                {!callEstablished && isCaller && (
+                    <button onClick={startCall} className="icon-btn start-call-btn">
+                        <FaPhone />
+                    </button>
+                )}
+                {callEstablished && (
+                    <>
+                        <button onClick={endCall} className="icon-btn end-call">
+                            <FaTimes />
+                        </button>
+                        <button onClick={flipCamera} className="icon-btn">
+                            <FaSync />
+                        </button>
+                        <button onClick={toggleMute} className="icon-btn">
+                            {isMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
+                        </button>
+                        <button onClick={toggleCamera} className="icon-btn">
+                            {isCameraOff ? <FaVideoSlash /> : <FaVideo />}
+                        </button>
+                    </>
+                )}
+            </div>
         </div>
-      )}
-
-      <div className="controls">
-        {!callEstablished && isCaller && (
-          <button onClick={startCall} className="icon-btn start-call-btn">
-            <FaPhone />
-          </button>
-        )}
-        {callEstablished && (
-          <>
-            <button onClick={endCall} className="icon-btn end-call">
-              <FaTimes />
-            </button>
-            <button onClick={flipCamera} className="icon-btn">
-              <FaSync />
-            </button>
-            <button onClick={toggleMute} className="icon-btn">
-              {isMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
+    );
 };
 
 export default VideoCall;
