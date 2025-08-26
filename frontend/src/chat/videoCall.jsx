@@ -149,14 +149,19 @@ const VideoCall = () => {
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       localVideoRef.current.srcObject = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.play().catch(e => console.error("Local play error:", e));
+      }
 
       // Add tracks to the peer connection
-      stream.getTracks().forEach((track) => {
-        const existingSenders = peerConnection.current.getSenders();
-        const existingSender = existingSenders.find(sender => sender.track === track);
-        if (!existingSender) {
-          peerConnection.current.addTrack(track, stream);
+      const existingSenders = peerConnection.current.getSenders();
+      existingSenders.forEach(sender => {
+        if (sender.track) {
+          peerConnection.current.removeTrack(sender);
         }
+      });
+      stream.getTracks().forEach((track) => {
+        peerConnection.current.addTrack(track, stream);
       });
     } catch (error) {
       console.error("Error accessing camera:", error);
@@ -167,8 +172,8 @@ const VideoCall = () => {
     if (callEstablished) return;
 
     // Await for tracks to be added before creating offer
-    await new Promise(resolve => setTimeout(resolve, 500)); 
-    
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     const offer = await peerConnection.current.createOffer();
     await peerConnection.current.setLocalDescription(offer);
     socket.emit("offer", { to: receiverId, sdp: offer });

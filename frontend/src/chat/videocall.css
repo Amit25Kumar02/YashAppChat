@@ -100,81 +100,10 @@
 /* Adjustments for a more mobile-friendly and integrated look */
 @media (max-width: 768px) {
     .call-timer {
-        bottom: 15%;
+        bottom: 15%; /* Position above controls on mobile */
         top: auto;
         left: 50%;
         transform: translateX(-50%);
         font-size: 1rem;
     }
-}
-
-/* === Notification Banners === */
-.call-notification {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.7);
-    padding: 20px 30px;
-    color: white;
-    border-radius: 10px;
-    font-size: 1.2rem;
-    font-weight: bold;
-    text-align: center;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-}
-
-/* === Online Users/Calling View === */
-.online-users {
-    position: absolute;
-    bottom: 10%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.6);
-    padding: 20px;
-    color: white;
-    border-radius: 8px;
-    text-align: center;
-}
-
-.online-users ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.online-users li {
-    margin-bottom: 10px;
-}
-
-.call-button {
-    padding: 12px 24px;
-    background-color: #075e54;
-    border: none;
-    color: white;
-    font-size: 1rem;
-    border-radius: 25px;
-    cursor: pointer;
-    margin-top: 15px;
-    transition: background-color 0.3s ease;
-}
-
-.call-button:hover {
-    background-color: #054c41;
-}
-
-.call-button.accept {
-    background-color: #4cd964;
-}
-
-.call-button.accept:hover {
-    background-color: #38b24a;
-}
-
-.call-button.reject {
-    background-color: #ff4747;
-}
-
-.call-button.reject:hover {
-    background-color: #ff1a1a;
 }
