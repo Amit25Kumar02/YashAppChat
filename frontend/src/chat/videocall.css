@@ -21,11 +21,12 @@
 /* === Local Video (User's own feed) === */
 .local-video {
     position: absolute;
-    bottom: 25%;
+    bottom: 10%;
     right: 5%;
-    width: 20%;
+    width: 25vw; /* Use vw for responsive width */
     height: auto;
-    max-width: 100px;
+    max-width: 150px; /* A good maximum for mobile */
+    min-width: 100px; /* Ensure it's not too small */
     border-radius: 10px;
     border: 2px solid white;
     object-fit: cover;
@@ -99,7 +100,7 @@
 /* Adjustments for a more mobile-friendly and integrated look */
 @media (max-width: 768px) {
     .call-timer {
-        bottom: 15%; /* Position above controls on mobile */
+        bottom: 15%;
         top: auto;
         left: 50%;
         transform: translateX(-50%);
