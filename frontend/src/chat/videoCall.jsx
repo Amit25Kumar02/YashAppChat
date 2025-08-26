@@ -7,8 +7,6 @@ import {
   FaSync,
   FaMicrophoneSlash,
   FaMicrophone,
-  FaVideo,
-  FaVideoSlash,
   FaTimes,
 } from "react-icons/fa";
 import { useParams, useNavigate } from "react-router-dom";
@@ -18,7 +16,7 @@ const VideoCall = () => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
-  const [callStarted, setCallStarted] = useState(false);
+  const [callEstablished, setCallEstablished] = useState(false);
   const [isFrontCamera, setIsFrontCamera] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [isSelfViewDragging, setIsSelfViewDragging] = useState(false);
@@ -29,7 +27,7 @@ const VideoCall = () => {
   const [callDuration, setCallDuration] = useState(0);
   const durationIntervalRef = useRef(null);
   const timeoutRef = useRef(null);
-  const earlyCandidates = useRef([]); // A queue to store early ICE candidates
+  const earlyCandidates = useRef([]);
 
   const [userProfile, setUserProfile] = useState(null);
   const [isCaller, setIsCaller] = useState(true);
@@ -55,10 +53,11 @@ const VideoCall = () => {
     });
 
     peerConnection.current.ontrack = (event) => {
-      if (remoteVideoRef.current.srcObject !== event.streams[0]) {
+      console.log("Remote stream received:", event.streams[0]);
+      if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== event.streams[0]) {
         remoteVideoRef.current.srcObject = event.streams[0];
-        remoteVideoRef.current.play().catch(() => {});
-        setCallStarted(true);
+        remoteVideoRef.current.play().catch(e => console.error("Remote play error:", e));
+        setCallEstablished(true);
       }
     };
 
@@ -72,10 +71,9 @@ const VideoCall = () => {
     };
 
     const handleOffer = async ({ from, sdp }) => {
+      console.log("Received offer:", sdp);
       setIsCaller(false);
-      await peerConnection.current.setRemoteDescription(
-        new RTCSessionDescription(sdp)
-      );
+      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
       earlyCandidates.current.forEach((candidate) => {
         peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
       });
@@ -84,21 +82,21 @@ const VideoCall = () => {
       const answer = await peerConnection.current.createAnswer();
       await peerConnection.current.setLocalDescription(answer);
       socket.emit("answer", { to: from, sdp: answer });
+      setCallEstablished(true);
     };
 
     const handleAnswer = async ({ sdp }) => {
+      console.log("Received answer:", sdp);
       clearTimeout(timeoutRef.current);
-      await peerConnection.current.setRemoteDescription(
-        new RTCSessionDescription(sdp)
-      );
+      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
       earlyCandidates.current.forEach((candidate) => {
         peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
       });
       earlyCandidates.current = [];
-      setCallStarted(true);
     };
 
     const handleIceCandidate = ({ candidate }) => {
+      console.log("Received ICE candidate:", candidate);
       if (peerConnection.current.remoteDescription) {
         peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
       } else {
@@ -107,11 +105,8 @@ const VideoCall = () => {
     };
 
     const handleCallEnded = () => {
-      if (peerConnection.current) {
-        peerConnection.current.close();
-      }
-      clearInterval(durationIntervalRef.current);
-      navigate("/chat");
+      console.log("Call ended by peer.");
+      endCall();
     };
 
     socket.on("offer", handleOffer);
@@ -119,10 +114,7 @@ const VideoCall = () => {
     socket.on("ice-candidate", handleIceCandidate);
     socket.on("call-ended", handleCallEnded);
 
-    // Start local camera immediately
-    startLocalStream().then(() => {
-      setCallStarted(true); // show self-view immediately
-    });
+    startLocalStream();
 
     return () => {
       socket.off("offer", handleOffer);
@@ -138,7 +130,7 @@ const VideoCall = () => {
   }, [receiverId, navigate, userProfile]);
 
   useEffect(() => {
-    if (callStarted) {
+    if (callEstablished) {
       durationIntervalRef.current = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
@@ -147,7 +139,7 @@ const VideoCall = () => {
     return () => {
       clearInterval(durationIntervalRef.current);
     };
-  }, [callStarted]);
+  }, [callEstablished]);
 
   const startLocalStream = async () => {
     try {
@@ -158,22 +150,13 @@ const VideoCall = () => {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       localVideoRef.current.srcObject = stream;
 
-      // Ensure local video starts playing
-      if (localVideoRef.current) {
-        await localVideoRef.current
-          .play()
-          .catch((e) => console.error("Local play error:", e));
-      }
-
-      const existingSenders = peerConnection.current.getSenders();
-      existingSenders.forEach((sender) => {
-        if (sender.track && sender.track.kind === "video") {
-          peerConnection.current.removeTrack(sender);
-        }
-      });
-
+      // Add tracks to the peer connection
       stream.getTracks().forEach((track) => {
-        peerConnection.current.addTrack(track, stream);
+        const existingSenders = peerConnection.current.getSenders();
+        const existingSender = existingSenders.find(sender => sender.track === track);
+        if (!existingSender) {
+          peerConnection.current.addTrack(track, stream);
+        }
       });
     } catch (error) {
       console.error("Error accessing camera:", error);
@@ -181,8 +164,11 @@ const VideoCall = () => {
   };
 
   const startCall = async () => {
-    if (callStarted) return;
+    if (callEstablished) return;
 
+    // Await for tracks to be added before creating offer
+    await new Promise(resolve => setTimeout(resolve, 500)); 
+    
     const offer = await peerConnection.current.createOffer();
     await peerConnection.current.setLocalDescription(offer);
     socket.emit("offer", { to: receiverId, sdp: offer });
@@ -200,6 +186,7 @@ const VideoCall = () => {
   const endCall = () => {
     clearInterval(durationIntervalRef.current);
     clearTimeout(timeoutRef.current);
+    setCallEstablished(false);
 
     if (userProfile && receiverId) {
       socket.emit("saveCallHistory", {
@@ -213,6 +200,7 @@ const VideoCall = () => {
 
     if (peerConnection.current) {
       peerConnection.current.close();
+      peerConnection.current = null;
     }
     socket.emit("call-ended", { to: receiverId });
     navigate("/chat");
@@ -225,10 +213,7 @@ const VideoCall = () => {
     }
 
     setIsFrontCamera((prev) => !prev);
-
-    setTimeout(() => {
-      startLocalStream();
-    }, 100);
+    startLocalStream();
   };
 
   const toggleMute = () => {
@@ -242,7 +227,8 @@ const VideoCall = () => {
     }
   };
 
-  const handleDragStart = () => {
+  const handleDragStart = (e) => {
+    e.preventDefault();
     setIsSelfViewDragging(true);
   };
 
@@ -252,7 +238,7 @@ const VideoCall = () => {
 
   const handleDragging = (e) => {
     if (!isSelfViewDragging) return;
-    setPosition({ x: e.clientX - 75, y: e.clientY - 50 });
+    setPosition({ x: e.clientX, y: e.clientY });
   };
 
   const formatTime = (seconds) => {
@@ -263,7 +249,7 @@ const VideoCall = () => {
   };
 
   return (
-    <div className="video-container">
+    <div className="video-container" onMouseMove={handleDragging} onMouseUp={handleDragEnd}>
       <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline />
       <video
         ref={localVideoRef}
@@ -271,24 +257,22 @@ const VideoCall = () => {
         autoPlay
         playsInline
         muted
-        style={{ left: `${position.x}px`, top: `${position.y}px` }}
+        style={{ left: `${position.x - 75}px`, top: `${position.y - 50}px` }}
         onMouseDown={handleDragStart}
-        onMouseMove={handleDragging}
-        onMouseUp={handleDragEnd}
       />
-      {callStarted && (
+      {callEstablished && (
         <div className="call-timer">
           <p>{formatTime(callDuration)}</p>
         </div>
       )}
 
       <div className="controls">
-        {!callStarted && isCaller && (
+        {!callEstablished && isCaller && (
           <button onClick={startCall} className="icon-btn start-call-btn">
             <FaPhone />
           </button>
         )}
-        {callStarted && (
+        {callEstablished && (
           <>
             <button onClick={endCall} className="icon-btn end-call">
               <FaTimes />

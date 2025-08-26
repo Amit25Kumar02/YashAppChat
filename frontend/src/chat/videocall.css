@@ -15,7 +15,7 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
-    background: #737272; 
+    background: #737272;
 }
 
 /* === Local Video (User's own feed) === */
@@ -74,11 +74,37 @@
 }
 
 .icon-btn.end-call {
-    background: #ff4747; /* A distinct red for ending the call */
+    background: #ff4747;
 }
 
 .icon-btn.end-call:hover {
     background: #ff1a1a;
+}
+
+/* === Call Timer === */
+.call-timer {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.7);
+    padding: 5px 10px;
+    color: white;
+    border-radius: 5px;
+    font-size: 0.9rem;
+    z-index: 2;
+    text-align: center;
+}
+
+/* Adjustments for a more mobile-friendly and integrated look */
+@media (max-width: 768px) {
+    .call-timer {
+        bottom: 15%; /* Position above controls on mobile */
+        top: auto;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 1rem;
+    }
 }
 
 /* === Notification Banners === */
