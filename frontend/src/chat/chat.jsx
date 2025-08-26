@@ -17,7 +17,6 @@ import { BiCheckDouble } from 'react-icons/bi'; // Import the check double icon
 import ringingSound from "../assets/audio/ring.mp3";
 import callingSound from "../assets/audio/calling.mp3";
 
-// const APIURL = "http://localhost:4000/api";
 const APIURL = "https://yashapp-chat-application.onrender.com/api";
 
 const generateTempId = () => Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -87,54 +86,55 @@ const Chat = () => {
     }, []);
 
     useEffect(() => {
-        if (userProfile._id) {
-            socket.emit("user-online", userProfile._id);
-            socket.on("update-user-status", setOnlineUsers);
-            
-            socket.on("call-invitation", ({ from, name }) => {
-                setVideoCallData({ callerId: from, callerName: name });
-                ringingAudio.current.play().catch(e => console.error("Ringing sound error:", e));
-                toast.info(`${name} is calling...`, { autoClose: false, closeButton: false });
-            });
+        if (!userProfile._id) return;
 
-            socket.on("call-accepted", () => {
-                setIsCalling(true);
-                callingAudio.current.pause();
-                callingAudio.current.currentTime = 0;
-                navigate(`/video/${receiverId}`);
-            });
-            
-            socket.on("call-rejected", () => {
-                setIsCalling(false);
-                callingAudio.current.pause();
-                callingAudio.current.currentTime = 0;
-                setVideoCallData(null);
-                toast.dismiss();
-                toast.info(`${videoCallData?.callerName || "User"} rejected the call.`);
-            });
-            
-            // New listener for when a message is marked as read
-            socket.on("messageRead", (updatedMessage) => {
-                setMessages(prev => 
-                    prev.map(msg => 
-                        msg._id === updatedMessage._id ? { ...msg, read: updatedMessage.read } : msg
-                    )
-                );
-            });
+        socket.emit("user-online", userProfile._id);
+        socket.on("update-user-status", setOnlineUsers);
 
-            return () => {
-                socket.off("update-user-status");
-                socket.off("call-invitation");
-                socket.off("call-accepted");
-                socket.off("call-rejected");
-                socket.off("messageRead"); // Clean up the new listener
-                callingAudio.current.pause();
-                callingAudio.current.currentTime = 0;
-                ringingAudio.current.pause();
-                ringingAudio.current.currentTime = 0;
-            };
-        }
-    }, [userProfile]);
+        socket.on("call-invitation", ({ from, name }) => {
+            setVideoCallData({ callerId: from, callerName: name });
+            ringingAudio.current.loop = true;
+            ringingAudio.current.play().catch(e => console.error("Ringing sound error:", e));
+            toast.info(`${name} is calling...`, { autoClose: false, closeButton: false, toastId: 'call' });
+        });
+
+        socket.on("call-accepted", () => {
+            setIsCalling(true);
+            callingAudio.current.pause();
+            callingAudio.current.currentTime = 0;
+            toast.dismiss('call');
+            navigate(`/video/${receiverId}`);
+        });
+
+        socket.on("call-rejected", () => {
+            setIsCalling(false);
+            callingAudio.current.pause();
+            callingAudio.current.currentTime = 0;
+            toast.dismiss('call');
+            setVideoCallData(null);
+            toast.info(`${receiverName || "User"} rejected the call.`);
+        });
+
+        socket.on("messageRead", (updatedMessage) => {
+            setMessages(prev =>
+                prev.map(msg =>
+                    msg._id === updatedMessage._id ? { ...msg, read: updatedMessage.read } : msg
+                )
+            );
+        });
+
+        return () => {
+            socket.off("update-user-status");
+            socket.off("call-invitation");
+            socket.off("call-accepted");
+            socket.off("call-rejected");
+            socket.off("messageRead");
+            callingAudio.current.pause();
+            callingAudio.current.currentTime = 0;
+            ringingAudio.current.pause();
+            ringingAudio.current.currentTime = 0;
+        };
+    }, [userProfile, receiverId]);
 
     useEffect(() => {
         if (!userProfile._id || !receiverId) return;
@@ -155,7 +155,6 @@ const Chat = () => {
 
         const handleReceiveMessage = (data) => {
             if (data.sender === receiverId && data.receiver === userProfile._id) {
-                // Mark the received message as read on the backend
                 axios.put(`${APIURL}/chat/read/${data._id}`, {}, {
                     headers: {
                         Authorization: `Bearer ${localStorage.getItem("token")}`
@@ -229,13 +228,13 @@ const Chat = () => {
         setReceiverName("");
         setMessages([]);
     };
-    
+
     const sendMessage = async () => {
         if (!message || !receiverId) {
             toast.error("Please select a user and type a message.");
             return;
         }
-        
+
         const tempId = generateTempId();
         const data = {
             sender: userProfile._id,
@@ -256,12 +255,12 @@ const Chat = () => {
             });
             const savedMessage = res.data;
 
-            setMessages((prev) => 
+            setMessages((prev) =>
                 prev.map((msg) => (msg._id === tempId ? savedMessage : msg))
             );
 
             socket.emit("sendMessage", savedMessage);
-            
+
         } catch (error) {
             console.error("Message send failed:", error);
             toast.error("Message send failed");
@@ -282,7 +281,7 @@ const Chat = () => {
             from: userProfile._id,
             name: userProfile.username
         });
-        toast.info(`Calling ${receiverName}...`, { autoClose: false, closeButton: false });
+        toast.info(`Calling ${receiverName}...`, { autoClose: false, closeButton: false, toastId: 'call' });
     };
 
     const acceptCall = () => {
@@ -291,7 +290,7 @@ const Chat = () => {
         ringingAudio.current.currentTime = 0;
         socket.emit("call-accepted", { to: videoCallData.callerId });
         navigate(`/video/${videoCallData.callerId}`);
-        toast.dismiss();
+        toast.dismiss('call');
     };
 
     const rejectCall = () => {
@@ -300,7 +299,7 @@ const Chat = () => {
         socket.emit("call-rejected", { to: videoCallData.callerId });
         setVideoCallData(null);
         setIsCalling(false);
-        toast.dismiss();
+        toast.dismiss('call');
     };
 
     const handleLogout = () => {
@@ -388,10 +387,9 @@ const Chat = () => {
                                 )}
                                 <div className="message-status-container">
                                     <span className="message-time">{formatDate(msg.createdAt)}</span>
-                                    {/* Display read ticks only for sent messages */}
                                     {msg.sender === userProfile._id && (
-                                        <BiCheckDouble 
-                                            className={`read-receipt-tick ${msg.read ? 'read-blue' : 'unread-gray'}`} 
+                                        <BiCheckDouble
+                                            className={`read-receipt-tick ${msg.read ? 'read-blue' : 'unread-gray'}`}
                                         />
                                     )}
                                 </div>
@@ -416,7 +414,7 @@ const Chat = () => {
                         disabled={!receiverId}
                     />
                     <button className="btn btn-primary send-btn" onClick={sendMessage} disabled={!receiverId || !message}>
-                       <span className="send-icons">▷</span>
+                        <span className="send-icons">▷</span>
                     </button>
                 </div>
             </div>

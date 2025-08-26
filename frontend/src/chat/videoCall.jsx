@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useRef, useEffect, useState } from "react";
-import { socket } from "./socket.jsx";
+import { socket } from "./socket";
 import "./videocall.css";
 import {
   FaPhone,
