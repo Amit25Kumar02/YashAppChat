@@ -26,6 +26,8 @@ app.post("/", async (req, res) => {
         if (existingUser) return res.status(400).json({ message: "User already exists" });
         const newUser = new User({ username, phoneNumber, email, password });
         await newUser.save();
+        const io = req.app.get("io");
+        if (io) io.emit("new-user", { _id: newUser._id, username: newUser.username, avatar: newUser.avatar, online: false, friends: [], friendRequests: [] });
         res.status(200).json({ message: "✅ User registered successfully" });
     } catch (error) {
         res.status(500).json({ message: "Internal Server Error" });
@@ -96,11 +98,85 @@ app.get("/username/:username", async (req, res) => {
 app.get("/users", async (req, res) => {
     try {
         const token = req.headers.authorization.split(" ")[1];
-        jwt.verify(token, process.env.JWT_SECRET);
-        const users = await User.find().select("-password");
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const users = await User.find({ _id: { $ne: decoded.id } }).select("-password");
         res.json(users);
     } catch (error) {
         res.status(401).json({ message: "Unauthorized" });
+    }
+});
+
+// Send friend request
+app.post("/friend-request", async (req, res) => {
+    try {
+        const token = req.headers.authorization.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const { toId } = req.body;
+        const target = await User.findById(toId);
+        if (!target) return res.status(404).json({ message: "User not found" });
+        if (target.friendRequests.includes(decoded.id) || target.friends.includes(decoded.id))
+            return res.status(400).json({ message: "Already sent or friends" });
+        await User.findByIdAndUpdate(toId, { $push: { friendRequests: decoded.id } });
+        const io = req.app.get("io");
+        const onlineUsers = req.app.get("onlineUsers");
+        const targetSocket = onlineUsers[toId];
+        if (io && targetSocket) io.to(targetSocket).emit("friend-request", { from: decoded.id });
+        res.json({ message: "Request sent" });
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+// Accept friend request
+app.post("/friend-accept", async (req, res) => {
+    try {
+        const token = req.headers.authorization.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const { fromId } = req.body;
+        await User.findByIdAndUpdate(decoded.id, { $pull: { friendRequests: fromId }, $push: { friends: fromId } });
+        await User.findByIdAndUpdate(fromId, { $push: { friends: decoded.id } });
+        const io = req.app.get("io");
+        const onlineUsers = req.app.get("onlineUsers");
+        const [me, friend] = await Promise.all([
+            User.findById(decoded.id).select("-password"),
+            User.findById(fromId).select("-password")
+        ]);
+        const fromSocket = onlineUsers[fromId];
+        if (io && fromSocket) io.to(fromSocket).emit("friend-accepted", { by: decoded.id, user: me });
+        res.json({ user: friend });
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+// Reject friend request
+app.post("/friend-reject", async (req, res) => {
+    try {
+        const token = req.headers.authorization.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const { fromId } = req.body;
+        await User.findByIdAndUpdate(decoded.id, { $pull: { friendRequests: fromId } });
+        res.json({ message: "Rejected" });
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+// Unfriend
+app.post("/unfriend", async (req, res) => {
+    try {
+        const token = req.headers.authorization.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const { friendId } = req.body;
+        await User.findByIdAndUpdate(decoded.id, { $pull: { friends: friendId } });
+        await User.findByIdAndUpdate(friendId, { $pull: { friends: decoded.id } });
+        const io = req.app.get("io");
+        const onlineUsers = req.app.get("onlineUsers");
+        const friendSocket = onlineUsers[friendId];
+        if (io && friendSocket) io.to(friendSocket).emit("unfriended", { by: decoded.id });
+        res.json({ message: "Unfriended" });
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
     }
 });
 

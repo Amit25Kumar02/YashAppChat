@@ -4,7 +4,7 @@ import AuthContext from "./authContext";
 import { socket } from "./socket";
 import axios from "axios";
 import EmojiPicker from "emoji-picker-react";
-import { FaSignOutAlt, FaVideo, FaSmile, FaArrowLeft, FaImage, FaPaperPlane, FaPhone, FaPhoneSlash, FaTrash, FaTimes, FaCamera, FaMicrophone, FaStop } from "react-icons/fa";
+import { FaSignOutAlt, FaVideo, FaSmile, FaArrowLeft, FaImage, FaPaperPlane, FaPhone, FaPhoneSlash, FaTrash, FaTimes, FaCamera, FaMicrophone, FaStop, FaUserPlus, FaUsers } from "react-icons/fa";
 import { BiCheckDouble, BiCheck } from "react-icons/bi";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -13,6 +13,7 @@ import "./css/chat.css";
 
 import ringingSound from "../assets/audio/ring.mp3";
 import callingSound from "../assets/audio/calling.mp3";
+import notificationSound from "../assets/audio/notification.mp3";
 
 const APIURL = `${import.meta.env.VITE_API_URL || "http://localhost:4000"}/api`;
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:4000";
@@ -83,6 +84,7 @@ const Chat = () => {
     const recordingTimerRef = useRef(null);
 
     const [fetchKey, setFetchKey] = useState(0);
+    const [showPeople, setShowPeople] = useState(false);
 
     // Message selection
     const [selectedMsgs, setSelectedMsgs] = useState(new Set());
@@ -94,6 +96,7 @@ const Chat = () => {
     const navigate = useNavigate();
     const callingAudio = useRef(new Audio(callingSound));
     const ringingAudio = useRef(new Audio(ringingSound));
+    const requestAudio = useRef(new Audio(notificationSound));
 
     // Auth + restore last chat
     useEffect(() => {
@@ -103,6 +106,42 @@ const Chat = () => {
             .then(res => setUserProfile(res.data))
             .catch(() => navigate("/"));
     }, []);
+
+    // Real-time: new user registered
+    useEffect(() => {
+        const handleNewUser = (u) => setAllUsers(prev => prev.find(x => x._id === u._id) ? prev : [...prev, u]);
+        socket.on("new-user", handleNewUser);
+        return () => socket.off("new-user", handleNewUser);
+    }, []);
+
+    // Real-time: incoming friend request
+    useEffect(() => {
+        if (!userProfile._id) return;
+        const handleFriendRequest = ({ from }) => {
+            setAllUsers(prev => prev.map(u => u._id === from ? { ...u, sentMeRequest: true } : u));
+            requestAudio.current.currentTime = 0;
+            requestAudio.current.play().catch(() => {});
+            toast.info("You have a new friend request!");
+        };
+        const handleFriendAccepted = ({ by, user: newFriend }) => {
+            setAllUsers(prev => prev.map(u => u._id === by ? { ...u, ...newFriend } : u));
+            setUserProfile(prev => ({ ...prev, friends: [...(prev.friends || []), by] }));
+            toast.success(`${newFriend.username} accepted your friend request!`);
+        };
+        const handleUnfriended = ({ by }) => {
+            setUserProfile(prev => ({ ...prev, friends: (prev.friends || []).filter(id => String(id) !== String(by)) }));
+            setAllUsers(prev => prev.map(u => u._id === by ? { ...u, pendingRequest: false } : u));
+            toast.info("A friend removed you.");
+        };
+        socket.on("friend-request", handleFriendRequest);
+        socket.on("friend-accepted", handleFriendAccepted);
+        socket.on("unfriended", handleUnfriended);
+        return () => {
+            socket.off("friend-request", handleFriendRequest);
+            socket.off("friend-accepted", handleFriendAccepted);
+            socket.off("unfriended", handleUnfriended);
+        };
+    }, [userProfile._id]);
 
     // Socket: online status, calls, read receipts
     useEffect(() => {
@@ -198,15 +237,80 @@ const Chat = () => {
         axios.get(`${APIURL}/auth/users`, {
             headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
         }).then(res => {
-            const others = res.data.filter(u => u._id !== userProfile._id);
-            setAllUsers(others);
+            // Mark users who sent me a request
+            const withFlags = res.data.map(u => ({
+                ...u,
+                sentMeRequest: (userProfile.friendRequests || []).map(String).includes(String(u._id))
+            }));
+            setAllUsers(withFlags);
             const savedId = localStorage.getItem("lastReceiverId");
             if (savedId) {
-                const found = others.find(u => u._id === savedId);
+                const found = withFlags.find(u => u._id === savedId);
                 if (found) setReceiverUser(found);
             }
         }).catch(() => {});
     }, [userProfile._id]);
+
+    const isFriend = (uid) => (userProfile.friends || []).map(String).includes(String(uid));
+    const hasSentRequest = (uid) => (allUsers.find(u => u._id === uid)?.friendRequests || []).map(String).includes(String(userProfile._id));
+
+    const sendFriendRequest = async (toId) => {
+        try {
+            await axios.post(`${APIURL}/auth/friend-request`, { toId }, {
+                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+            });
+            // Mark locally as pending
+            setAllUsers(prev => prev.map(u => u._id === toId ? { ...u, pendingRequest: true } : u));
+            toast.success("Friend request sent!");
+        } catch (e) {
+            toast.error(e.response?.data?.message || "Failed to send request");
+        }
+    };
+
+    const acceptFriendRequest = async (fromId) => {
+        try {
+            const res = await axios.post(`${APIURL}/auth/friend-accept`, { fromId }, {
+                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+            });
+            setUserProfile(prev => ({
+                ...prev,
+                friends: [...(prev.friends || []), fromId],
+                friendRequests: (prev.friendRequests || []).filter(id => String(id) !== String(fromId))
+            }));
+            setAllUsers(prev => prev.map(u => u._id === fromId ? { ...u, ...res.data.user, sentMeRequest: false } : u));
+            toast.success("Friend added!");
+        } catch {
+            toast.error("Failed to accept request");
+        }
+    };
+
+    const rejectFriendRequest = async (fromId) => {
+        try {
+            await axios.post(`${APIURL}/auth/friend-reject`, { fromId }, {
+                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+            });
+            setUserProfile(prev => ({
+                ...prev,
+                friendRequests: (prev.friendRequests || []).filter(id => String(id) !== String(fromId))
+            }));
+            setAllUsers(prev => prev.map(u => u._id === fromId ? { ...u, sentMeRequest: false } : u));
+        } catch {
+            toast.error("Failed to reject request");
+        }
+    };
+
+    const unfriend = async (friendId) => {
+        try {
+            await axios.post(`${APIURL}/auth/unfriend`, { friendId }, {
+                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+            });
+            setUserProfile(prev => ({ ...prev, friends: (prev.friends || []).filter(id => String(id) !== String(friendId)) }));
+            if (receiverId === friendId) handleBackClick();
+            toast.success("Unfriended.");
+        } catch {
+            toast.error("Failed to unfriend.");
+        }
+    };
 
     // Responsive sidebar
     useEffect(() => {
@@ -523,7 +627,6 @@ const Chat = () => {
             <aside className={`sidebar ${!showSidebar ? "sidebar-hidden" : ""}`}>
                 <div className="sidebar-header">
                     <div className="sidebar-profile">
-                        {/* Clickable avatar for profile photo change */}
                         <div className="profile-avatar-wrap" onClick={() => avatarInputRef.current.click()} title="Change profile photo">
                             <Avatar user={userProfile} size="sm" />
                             <div className="profile-avatar-overlay"><FaCamera /></div>
@@ -531,17 +634,50 @@ const Chat = () => {
                         <input type="file" accept="image/*" ref={avatarInputRef} style={{ display: "none" }} onChange={handleAvatarChange} />
                         <span className="sidebar-username">{userProfile.username}</span>
                     </div>
-                    <button className="icon-btn-flat" onClick={handleLogout} title="Logout">
-                        <FaSignOutAlt />
-                    </button>
+                    <div style={{ display: "flex", gap: 4 }}>
+                        <button className="icon-btn-flat" onClick={() => setShowPeople(p => !p)} title="Add People" style={{ position: "relative" }}>
+                            <FaUserPlus />
+                            {allUsers.filter(u => u.sentMeRequest).length > 0 && (
+                                <span className="req-notif-badge">{allUsers.filter(u => u.sentMeRequest).length}</span>
+                            )}
+                        </button>
+                        <button className="icon-btn-flat" onClick={handleLogout} title="Logout">
+                            <FaSignOutAlt />
+                        </button>
+                    </div>
                 </div>
 
-                <div className="sidebar-search">
-                    <input type="text" placeholder="Search or start new chat" className="search-input" readOnly />
-                </div>
+                {/* Add People / Friend Requests Panel */}
+                {showPeople && (
+                    <div className="people-panel">
+                        <div className="people-panel-title"><FaUsers /> People</div>
+                        {allUsers.filter(u => !isFriend(u._id)).map(u => (
+                            <div key={u._id} className="people-item">
+                                <div className="contact-avatar-wrap">
+                                    <Avatar user={u} size="sm" />
+                                    {isOnline(u._id) && <span className="online-badge" />}
+                                </div>
+                                <span className="people-name">{u.username}</span>
+                                {u.sentMeRequest ? (
+                                    <div className="people-actions">
+                                        <button className="req-btn req-accept" onClick={() => acceptFriendRequest(u._id)}>Accept</button>
+                                        <button className="req-btn req-reject" onClick={() => rejectFriendRequest(u._id)}>Reject</button>
+                                    </div>
+                                ) : u.pendingRequest ? (
+                                    <span className="req-pending">Pending</span>
+                                ) : (
+                                    <button className="req-btn req-add" onClick={() => sendFriendRequest(u._id)}><FaUserPlus /></button>
+                                )}
+                            </div>
+                        ))}
+                        {allUsers.filter(u => !isFriend(u._id)).length === 0 && (
+                            <p className="people-empty">No new people to add</p>
+                        )}
+                    </div>
+                )}
 
                 <div className="contact-list">
-                    {allUsers.map(u => {
+                    {allUsers.filter(u => isFriend(u._id)).map(u => {
                         const unread = messages.filter(m => m.sender === u._id && !m.read).length;
                         const lastMsg = messages.filter(m => m.sender === u._id || m.receiver === u._id).slice(-1)[0];
                         return (
@@ -566,9 +702,16 @@ const Chat = () => {
                                         {unread > 0 && <span className="unread-badge">{unread}</span>}
                                     </div>
                                 </div>
+                                <button className="unfriend-btn" title="Unfriend" onClick={e => { e.stopPropagation(); unfriend(u._id); }}>✕</button>
                             </div>
                         );
                     })}
+                    {allUsers.filter(u => isFriend(u._id)).length === 0 && !showPeople && (
+                        <div className="no-friends-hint">
+                            <p>No friends yet.</p>
+                            <button className="req-btn req-add" onClick={() => setShowPeople(true)}><FaUserPlus /> Add People</button>
+                        </div>
+                    )}
                 </div>
             </aside>
 
