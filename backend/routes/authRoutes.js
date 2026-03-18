@@ -75,8 +75,11 @@ app.put("/avatar", upload.single("avatar"), async (req, res) => {
             if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         }
 
-        const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        const avatarUrl = `${baseUrl}/uploads/avatars/${req.file.filename}`;
         const user = await User.findByIdAndUpdate(decoded.id, { avatar: avatarUrl }, { new: true }).select("-password");
+        const io = req.app.get("io");
+        if (io) io.emit("user-updated", { _id: user._id, avatar: user.avatar, username: user.username });
         res.json(user);
     } catch (error) {
         res.status(500).json({ message: "Error updating avatar" });

@@ -46,9 +46,10 @@ const getInitial = (name) => name?.charAt(0)?.toUpperCase() || "?";
 const Avatar = ({ user, size = "md", className = "" }) => {
     const sizeClass = size === "sm" ? "avatar-sm" : size === "xs" ? "avatar-xs" : "";
     if (user?.avatar) {
+        const src = user.avatar.startsWith("http") ? user.avatar : `${BASE}${user.avatar}`;
         return (
             <img
-                src={`${BASE}${user.avatar}`}
+                src={src}
                 alt={user.username}
                 className={`avatar avatar-img ${sizeClass} ${className}`}
             />
@@ -107,11 +108,19 @@ const Chat = () => {
             .catch(() => navigate("/"));
     }, []);
 
-    // Real-time: new user registered
+    // Real-time: new user registered / user updated
     useEffect(() => {
         const handleNewUser = (u) => setAllUsers(prev => prev.find(x => x._id === u._id) ? prev : [...prev, u]);
+        const handleUserUpdated = (u) => {
+            setAllUsers(prev => prev.map(x => x._id === u._id ? { ...x, ...u } : x));
+            setReceiverUser(prev => prev?._id === u._id ? { ...prev, ...u } : prev);
+        };
         socket.on("new-user", handleNewUser);
-        return () => socket.off("new-user", handleNewUser);
+        socket.on("user-updated", handleUserUpdated);
+        return () => {
+            socket.off("new-user", handleNewUser);
+            socket.off("user-updated", handleUserUpdated);
+        };
     }, []);
 
     // Real-time: incoming friend request
