@@ -12,6 +12,21 @@ const ICE_SERVERS = {
     iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
+        {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+        },
+        {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+        },
+        {
+            urls: "turn:openrelay.metered.ca:443?transport=tcp",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+        },
     ],
 };
 
@@ -22,6 +37,7 @@ const AudioCall = () => {
     const localStreamRef = useRef(null);
     const pendingCandidates = useRef([]);
     const durationRef = useRef(null);
+    const remoteAudioRef = useRef(null);
 
     const [callEstablished, setCallEstablished] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
@@ -42,10 +58,10 @@ const AudioCall = () => {
         if (pcRef.current) pcRef.current.close();
         const pc = new RTCPeerConnection(ICE_SERVERS);
         pc.ontrack = (e) => {
-            if (e.streams[0]) {
-                const audio = new Audio();
-                audio.srcObject = e.streams[0];
-                audio.play().catch(() => {});
+            if (e.streams && e.streams[0]) {
+                if (!remoteAudioRef.current) remoteAudioRef.current = new Audio();
+                remoteAudioRef.current.srcObject = e.streams[0];
+                remoteAudioRef.current.play().catch(() => {});
                 setCallEstablished(true);
             }
         };
@@ -77,6 +93,10 @@ const AudioCall = () => {
 
     const cleanup = (notify = true) => {
         clearInterval(durationRef.current);
+        if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = null;
+            remoteAudioRef.current = null;
+        }
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach(t => t.stop());
             localStreamRef.current = null;

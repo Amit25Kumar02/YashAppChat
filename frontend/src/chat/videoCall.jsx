@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { socket } from "./socket";
 import "./videocall.css";
 import { FaMicrophoneSlash, FaMicrophone, FaVideoSlash, FaVideo } from "react-icons/fa";
@@ -13,6 +13,22 @@ const ICE_SERVERS = {
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
         { urls: "stun:stun2.l.google.com:19302" },
+        { urls: "stun:stun3.l.google.com:19302" },
+        {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+        },
+        {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+        },
+        {
+            urls: "turn:openrelay.metered.ca:443?transport=tcp",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+        },
     ],
 };
 
@@ -24,6 +40,7 @@ const VideoCall = () => {
     const pcRef = useRef(null);
     const localStreamRef = useRef(null);
     const pendingCandidates = useRef([]);
+    const remoteStreamRef = useRef(null);
 
     const [callEstablished, setCallEstablished] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
@@ -34,39 +51,50 @@ const VideoCall = () => {
 
     const { receiverId } = useParams();
     const [searchParams] = useSearchParams();
-    // role=caller means this user initiated the call
-    // role=receiver means this user accepted the call
     const role = searchParams.get("role") || "caller";
     const navigate = useNavigate();
 
     const getPC = () => pcRef.current;
 
-    const setupPC = () => {
-        if (pcRef.current) {
-            pcRef.current.close();
+    const attachRemoteStream = useCallback((stream) => {
+        remoteStreamRef.current = stream;
+        if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = stream;
+            remoteVideoRef.current.play().catch(() => {});
         }
+        setHasRemoteStream(true);
+        setCallEstablished(true);
+    }, []);
+
+    const remoteVideoCallbackRef = useCallback((node) => {
+        remoteVideoRef.current = node;
+        if (node && remoteStreamRef.current) {
+            node.srcObject = remoteStreamRef.current;
+            node.play().catch(() => {});
+        }
+    }, []);
+
+    const setupPC = () => {
+        if (pcRef.current) pcRef.current.close();
         const pc = new RTCPeerConnection(ICE_SERVERS);
 
         pc.ontrack = (e) => {
-            console.log("🎥 Remote track received");
-            if (remoteVideoRef.current && e.streams[0]) {
-                remoteVideoRef.current.srcObject = e.streams[0];
-                setHasRemoteStream(true);
-                setCallEstablished(true);
-            }
+            console.log("🎥 Remote track received", e.streams);
+            if (e.streams && e.streams[0]) attachRemoteStream(e.streams[0]);
         };
 
         pc.onicecandidate = (e) => {
-            if (e.candidate) {
-                console.log("🧊 Sending ICE candidate to", receiverId);
-                socket.emit("ice-candidate", { to: receiverId, candidate: e.candidate });
-            }
+            if (e.candidate) socket.emit("ice-candidate", { to: receiverId, candidate: e.candidate });
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            console.log("🧊 ICE state:", pc.iceConnectionState);
         };
 
         pc.onconnectionstatechange = () => {
             console.log("🔗 Connection state:", pc.connectionState);
             if (pc.connectionState === "failed") {
-                toast.error("Connection failed.");
+                toast.error("Connection failed. Check network.");
                 cleanup(false);
                 navigate("/chat");
             }
@@ -105,8 +133,6 @@ const VideoCall = () => {
 
     useEffect(() => {
         let mounted = true;
-
-        // Re-register socket so onlineUsers map is fresh on this page
         const myId = localStorage.getItem("myUserId");
         if (myId) socket.emit("user-online", myId);
 
@@ -114,40 +140,32 @@ const VideoCall = () => {
             setupPC();
             await getLocalStream();
             if (!mounted) return;
-
             if (role === "caller") {
-                // Small delay to ensure receiver's socket is registered
-                await new Promise(r => setTimeout(r, 800));
+                await new Promise(r => setTimeout(r, 1000));
                 if (!mounted) return;
-                console.log("📞 Role: CALLER — creating offer for", receiverId);
                 try {
-                    const offer = await getPC().createOffer();
+                    const offer = await getPC().createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
                     await getPC().setLocalDescription(offer);
                     socket.emit("offer", { to: receiverId, from: myId, sdp: offer });
-                    console.log("📤 Offer sent");
+                    console.log("📤 Offer sent to", receiverId);
                 } catch (err) {
                     console.error("❌ Error creating offer:", err);
                 }
-            } else {
-                console.log("📞 Role: RECEIVER — waiting for offer from", receiverId);
             }
         };
 
-        const handleOffer = async ({ from, sdp }) => {
+        const handleOffer = async ({ sdp }) => {
             if (!mounted) return;
-            console.log("📥 Offer received from", from);
+            console.log("📥 Offer received");
             try {
                 await getPC().setRemoteDescription(new RTCSessionDescription(sdp));
-                // Flush pending ICE candidates
-                for (const c of pendingCandidates.current) {
+                for (const c of pendingCandidates.current)
                     await getPC().addIceCandidate(new RTCIceCandidate(c));
-                }
                 pendingCandidates.current = [];
                 const answer = await getPC().createAnswer();
                 await getPC().setLocalDescription(answer);
-                // Send answer back to caller using their user ID
                 socket.emit("answer", { to: receiverId, sdp: answer });
-                console.log("📤 Answer sent to", receiverId);
+                console.log("📤 Answer sent");
             } catch (err) {
                 console.error("❌ Error handling offer:", err);
             }
@@ -158,11 +176,9 @@ const VideoCall = () => {
             console.log("📥 Answer received");
             try {
                 await getPC().setRemoteDescription(new RTCSessionDescription(sdp));
-                for (const c of pendingCandidates.current) {
+                for (const c of pendingCandidates.current)
                     await getPC().addIceCandidate(new RTCIceCandidate(c));
-                }
                 pendingCandidates.current = [];
-                setCallEstablished(true);
             } catch (err) {
                 console.error("❌ Error handling answer:", err);
             }
@@ -171,19 +187,18 @@ const VideoCall = () => {
         const handleIceCandidate = async ({ candidate }) => {
             if (!mounted || !candidate) return;
             try {
-                if (getPC()?.remoteDescription?.type) {
+                if (getPC()?.remoteDescription?.type)
                     await getPC().addIceCandidate(new RTCIceCandidate(candidate));
-                } else {
+                else
                     pendingCandidates.current.push(candidate);
-                }
             } catch (err) {
-                console.error("❌ ICE candidate error:", err);
+                console.error("❌ ICE error:", err);
             }
         };
 
         const handleCallEnded = () => {
             if (!mounted) return;
-            toast.info("Call ended by other user.");
+            toast.info("Call ended.");
             cleanup(false);
             navigate("/chat");
         };
@@ -212,52 +227,37 @@ const VideoCall = () => {
         return () => clearInterval(durationRef.current);
     }, [callEstablished]);
 
-    const endCall = () => {
-        const duration = callDuration;
-        cleanup(true);
-        // Save call ended message
-        const myId = localStorage.getItem("myUserId");
-        const content = duration > 0
-            ? `📹 Video call ended • ${formatDuration(duration)}`
-            : `📹 Video call ended`;
-        fetch(`${APIURL}/chat/send`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-            body: JSON.stringify({ sender: myId, receiver: receiverId, content, type: "call" }),
-        })
-        .then(r => r.json())
-        .then(saved => socket.emit("sendMessage", saved))
-        .catch(() => {});
-        navigate("/chat");
-    };
-
-    const toggleMute = () => {
-        const tracks = localStreamRef.current?.getAudioTracks();
-        if (tracks?.length) {
-            tracks[0].enabled = !tracks[0].enabled;
-            setIsMuted(p => !p);
-        }
-    };
-
-    const toggleCamera = () => {
-        const tracks = localStreamRef.current?.getVideoTracks();
-        if (tracks?.length) {
-            tracks[0].enabled = !tracks[0].enabled;
-            setIsCameraOff(p => !p);
-        }
-    };
-
     const formatDuration = (s) => {
         const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
         return [h, m, sec].map(v => String(v).padStart(2, "0")).join(":");
     };
 
+    const endCall = () => {
+        const duration = callDuration;
+        cleanup(true);
+        const myId = localStorage.getItem("myUserId");
+        const content = duration > 0 ? `📹 Video call ended • ${formatDuration(duration)}` : `📹 Video call ended`;
+        fetch(`${APIURL}/chat/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
+            body: JSON.stringify({ sender: myId, receiver: receiverId, content, type: "call" }),
+        }).then(r => r.json()).then(saved => socket.emit("sendMessage", saved)).catch(() => {});
+        navigate("/chat");
+    };
+
+    const toggleMute = () => {
+        const tracks = localStreamRef.current?.getAudioTracks();
+        if (tracks?.length) { tracks[0].enabled = !tracks[0].enabled; setIsMuted(p => !p); }
+    };
+
+    const toggleCamera = () => {
+        const tracks = localStreamRef.current?.getVideoTracks();
+        if (tracks?.length) { tracks[0].enabled = !tracks[0].enabled; setIsCameraOff(p => !p); }
+    };
+
     return (
         <div className="vc-container">
-            <video ref={remoteVideoRef} className="vc-remote" autoPlay playsInline />
+            <video ref={remoteVideoCallbackRef} className="vc-remote" autoPlay playsInline />
 
             {!hasRemoteStream && (
                 <div className="vc-waiting">
