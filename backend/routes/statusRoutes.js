@@ -1,19 +1,26 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const cloudinary = require("cloudinary").v2;
 const User = require("../models/User");
 const Status = require("../models/Status");
 
 const app = express();
 
-const statusDir = path.join(__dirname, "../uploads/statuses");
-if (!fs.existsSync(statusDir)) fs.mkdirSync(statusDir, { recursive: true });
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, statusDir),
-    filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname)),
+const storage = new CloudinaryStorage({
+    cloudinary,
+    params: async (req, file) => ({
+        folder: "yashapp/statuses",
+        allowed_formats: ["jpg", "jpeg", "png", "webp"],
+        public_id: Date.now() + "-" + file.originalname.split(".")[0],
+    }),
 });
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -49,8 +56,7 @@ app.post("/image", upload.single("image"), async (req, res) => {
     try {
         const decoded = auth(req);
         if (!req.file) return res.status(400).json({ message: "No image uploaded" });
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
-        const imageUrl = `${baseUrl}/uploads/statuses/${req.file.filename}`;
+        const imageUrl = req.file.path;
         const status = await Status.create({ user: decoded.id, type: "image", content: imageUrl, caption: req.body.caption || "" });
         const populated = await status.populate("user", "username avatar");
         const io = req.app.get("io");

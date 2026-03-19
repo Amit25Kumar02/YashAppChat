@@ -2,24 +2,32 @@ const express = require("express");
 const router = express.Router();
 const Message = require("../models/Message");
 const multer = require("multer");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const cloudinary = require("cloudinary").v2;
 const path = require("path");
 const fs = require("fs");
 
-const uploadDir = path.join(__dirname, "../uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const imageStorage = new CloudinaryStorage({
+    cloudinary,
+    params: async (req, file) => ({
+        folder: "yashapp/chat",
+        allowed_formats: ["jpg", "jpeg", "png", "webp", "gif"],
+        public_id: Date.now() + "-" + file.originalname.split(".")[0],
+    }),
+});
+const upload = multer({ storage: imageStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 const voiceDir = path.join(__dirname, "../uploads/voices");
 if (!fs.existsSync(voiceDir)) fs.mkdirSync(voiceDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname)),
-});
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
-
 const voiceStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, voiceDir),
-  filename: (req, file, cb) => cb(null, Date.now() + ".webm"),
+    destination: (req, file, cb) => cb(null, voiceDir),
+    filename: (req, file, cb) => cb(null, Date.now() + ".webm"),
 });
 const uploadVoice = multer({ storage: voiceStorage, limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -29,10 +37,10 @@ router.post("/upload-voice", uploadVoice.single("voice"), (req, res) => {
   res.json({ url: `/uploads/voices/${req.file.filename}` });
 });
 
-// Upload image
+// Upload image — now returns Cloudinary URL directly
 router.post("/upload", upload.single("image"), (req, res) => {
   if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-  res.json({ url: `/uploads/${req.file.filename}` });
+  res.json({ url: req.file.path });
 });
 
 // Send a message
@@ -81,13 +89,10 @@ router.delete("/message/:messageId", async (req, res) => {
   try {
     const msg = await Message.findByIdAndDelete(req.params.messageId);
     if (!msg) return res.status(404).json({ message: "Message not found." });
-    // Delete image file from disk if it's an image message
-    if (msg.type === "image" && msg.content) {
-      const filename = msg.content.split("/uploads/")[1];
-      if (filename) {
-        const filePath = path.join(uploadDir, filename);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      }
+    if (msg.type === "image" && msg.content?.includes("cloudinary")) {
+      const parts = msg.content.split("/");
+      const publicId = "yashapp/chat/" + parts[parts.length - 1].split(".")[0];
+      await cloudinary.uploader.destroy(publicId).catch(() => {});
     }
     res.json({ success: true, messageId: req.params.messageId });
   } catch (error) {
@@ -100,16 +105,13 @@ router.post("/delete-many", async (req, res) => {
   const { messageIds } = req.body;
   try {
     const msgs = await Message.find({ _id: { $in: messageIds } });
-    // Delete image files
-    msgs.forEach(msg => {
-      if (msg.type === "image" && msg.content) {
-        const filename = msg.content.split("/uploads/")[1];
-        if (filename) {
-          const filePath = path.join(uploadDir, filename);
-          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-        }
+    await Promise.all(msgs.map(async msg => {
+      if (msg.type === "image" && msg.content?.includes("cloudinary")) {
+        const parts = msg.content.split("/");
+        const publicId = "yashapp/chat/" + parts[parts.length - 1].split(".")[0];
+        await cloudinary.uploader.destroy(publicId).catch(() => {});
       }
-    });
+    }));
     await Message.deleteMany({ _id: { $in: messageIds } });
     res.json({ success: true });
   } catch (error) {

@@ -13,6 +13,7 @@ import "react-toastify/dist/ReactToastify.css";
 import { useNavigate } from "react-router-dom";
 import "./css/chat.css";
 import StatusPanel from "./StatusPanel";
+import { ShimmerCircularImage, ShimmerText } from "react-shimmer-effects";
 
 import ringingSound from "../assets/audio/ring.mp3";
 import callingSound from "../assets/audio/calling.mp3";
@@ -92,6 +93,8 @@ const Chat = () => {
     const recordingTimerRef = useRef(null);
 
     const [fetchKey, setFetchKey] = useState(0);
+    const [usersLoading, setUsersLoading] = useState(true);
+    const [messagesLoading, setMessagesLoading] = useState(false);
     const [showPeople, setShowPeople] = useState(false);
     const [peopleSearch, setPeopleSearch] = useState("");
     const [friendSearch, setFriendSearch] = useState("");
@@ -247,10 +250,11 @@ const Chat = () => {
         if (!userProfile._id || !receiverId) return;
         const myId = userProfile._id;
         setMessages([]);
+        setMessagesLoading(true);
 
         axios.get(`${APIURL}/chat/messages/${receiverId}?userId=${myId}`, {
             headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-        }).then(res => setMessages(res.data)).catch(() => setMessages([]));
+        }).then(res => setMessages(res.data)).catch(() => setMessages([])).finally(() => setMessagesLoading(false));
 
         const handleReceive = (data) => {
             const isRelevant = (
@@ -287,7 +291,6 @@ const Chat = () => {
         axios.get(`${APIURL}/auth/users`, {
             headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
         }).then(res => {
-            // Mark users who sent me a request
             const withFlags = res.data.map(u => ({
                 ...u,
                 sentMeRequest: (userProfile.friendRequests || []).map(String).includes(String(u._id))
@@ -298,7 +301,7 @@ const Chat = () => {
                 const found = withFlags.find(u => u._id === savedId);
                 if (found) setReceiverUser(found);
             }
-        }).catch(() => {});
+        }).catch(() => {}).finally(() => setUsersLoading(false));
     }, [userProfile._id]);
 
     const isFriend = (uid) => (userProfile.friends || []).map(String).includes(String(uid));
@@ -502,7 +505,7 @@ const Chat = () => {
             const uploadRes = await axios.post(`${APIURL}/chat/upload`, formData, {
                 headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
             });
-            const imageUrl = `${BASE}${uploadRes.data.url}`;
+            const imageUrl = uploadRes.data.url;
             const res = await axios.post(`${APIURL}/chat/send`,
                 { sender: userProfile._id, receiver: receiverId, content: imageUrl, type: "image" },
                 { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
@@ -792,7 +795,16 @@ const Chat = () => {
                             onChange={e => setFriendSearch(e.target.value)}
                         />
                     </div>
-                    {allUsers.filter(u => isFriend(u._id) && u.username.toLowerCase().includes(friendSearch.toLowerCase())).map(u => {
+                    {usersLoading ? (
+                        Array.from({ length: 5 }).map((_, i) => (
+                            <div key={i} className="contact-item" style={{ gap: 10, pointerEvents: "none" }}>
+                                <ShimmerCircularImage size={42} />
+                                <div style={{ flex: 1 }}>
+                                    <ShimmerText line={2} gap={8} />
+                                </div>
+                            </div>
+                        ))
+                    ) : allUsers.filter(u => isFriend(u._id) && u.username.toLowerCase().includes(friendSearch.toLowerCase())).map(u => {
                         const unread = messages.filter(m => m.sender === u._id && !m.read).length;
                         const lastMsg = messages.filter(m => m.sender === u._id || m.receiver === u._id).slice(-1)[0];
                         return (
@@ -821,7 +833,8 @@ const Chat = () => {
                             </div>
                         );
                     })}
-                    {allUsers.filter(u => isFriend(u._id) && u.username.toLowerCase().includes(friendSearch.toLowerCase())).length === 0 && !showPeople && (
+                    
+                    {!usersLoading && allUsers.filter(u => isFriend(u._id) && u.username.toLowerCase().includes(friendSearch.toLowerCase())).length === 0 && !showPeople && (
                         <div className="no-friends-hint">
                             <p>No friends yet.</p>
                             <button className="req-btn req-add" onClick={() => setShowPeople(true)}><FaUserPlus /> Add People</button>
@@ -887,9 +900,17 @@ const Chat = () => {
 
                         {/* Messages */}
                         <div className={`chat-body${selectMode ? " select-mode" : ""}`} ref={chatRef} style={selectMode ? { userSelect: 'none' } : {}}>
-                            {messages.length === 0 && (
+                            {messagesLoading ? (
+                                Array.from({ length: 6 }).map((_, i) => (
+                                    <div key={i} className={`msg-row ${i % 2 === 0 ? "msg-mine" : "msg-theirs"}`} style={{ pointerEvents: "none" }}>
+                                        <div style={{ width: i % 2 === 0 ? "55%" : "45%" }}>
+                                            <ShimmerText line={i % 3 === 0 ? 2 : 1} gap={6} />
+                                        </div>
+                                    </div>
+                                ))
+                            ) : messages.length === 0 ? (
                                 <div className="no-messages"><p>No messages yet. Say hello! 👋</p></div>
-                            )}
+                            ) : null}
                             {messages.map((msg, i) => {
                                 const isMine = msg.sender === userProfile._id;
                                 const showDivider = i === 0 || !isSameDay(messages[i - 1].createdAt, msg.createdAt);

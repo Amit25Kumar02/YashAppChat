@@ -3,18 +3,26 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const dotenv = require("dotenv");
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const cloudinary = require("cloudinary").v2;
 
 dotenv.config();
+
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 const app = express();
 
-const avatarDir = path.join(__dirname, "../uploads/avatars");
-if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
-
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, avatarDir),
-    filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname)),
+const storage = new CloudinaryStorage({
+    cloudinary,
+    params: async (req, file) => ({
+        folder: "yashapp/avatars",
+        allowed_formats: ["jpg", "jpeg", "png", "webp"],
+        public_id: Date.now() + "-" + file.originalname.split(".")[0],
+    }),
 });
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -68,21 +76,22 @@ app.put("/avatar", upload.single("avatar"), async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-        // Delete old avatar file if exists
+        // Delete old avatar from Cloudinary if exists
         const existing = await User.findById(decoded.id);
-        if (existing.avatar) {
-            const oldPath = path.join(__dirname, "../", existing.avatar);
-            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        if (existing.avatar && existing.avatar.includes("cloudinary")) {
+            const parts = existing.avatar.split("/");
+            const publicId = "yashapp/avatars/" + parts[parts.length - 1].split(".")[0];
+            await cloudinary.uploader.destroy(publicId).catch(() => {});
         }
 
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
-        const avatarUrl = `${baseUrl}/uploads/avatars/${req.file.filename}`;
+        const avatarUrl = req.file.path;
         const user = await User.findByIdAndUpdate(decoded.id, { avatar: avatarUrl }, { new: true }).select("-password");
         const io = req.app.get("io");
         if (io) io.emit("user-updated", { _id: user._id, avatar: user.avatar, username: user.username });
         res.json(user);
     } catch (error) {
-        res.status(500).json({ message: "Error updating avatar" });
+        console.error("Avatar upload error:", error);
+        res.status(500).json({ message: "Error updating avatar", error: error.message });
     }
 });
 
