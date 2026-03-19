@@ -91,15 +91,22 @@ const AudioCall = () => {
     useEffect(() => {
         let mounted = true;
 
+        // Re-register socket so onlineUsers map is fresh on this page
+        const myId = localStorage.getItem("myUserId");
+        if (myId) socket.emit("user-online", myId);
+
         const init = async () => {
             setupPC();
             await getLocalStream();
             if (!mounted) return;
             if (role === "caller") {
+                // Small delay to ensure receiver's socket is registered
+                await new Promise(r => setTimeout(r, 800));
+                if (!mounted) return;
                 try {
                     const offer = await getPC().createOffer();
                     await getPC().setLocalDescription(offer);
-                    socket.emit("audio-offer", { to: receiverId, from: localStorage.getItem("myUserId"), sdp: offer });
+                    socket.emit("audio-offer", { to: receiverId, from: myId, sdp: offer });
                 } catch (err) {
                     console.error("Error creating audio offer:", err);
                 }

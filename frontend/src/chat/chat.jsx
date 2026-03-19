@@ -111,7 +111,13 @@ const Chat = () => {
         if (!token) { navigate("/"); return; }
         axios.get(`${APIURL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
             .then(res => setUserProfile(res.data))
-            .catch(() => navigate("/"));
+            .catch(err => {
+                // Only logout on 401 (token invalid/expired), not on network errors
+                if (err.response?.status === 401) {
+                    localStorage.clear();
+                    navigate("/");
+                }
+            });
     }, []);
 
     // Real-time: new user registered / user updated

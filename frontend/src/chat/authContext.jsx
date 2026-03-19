@@ -3,14 +3,15 @@ import { createContext, useState, useEffect } from "react";
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
+    const [user, setUser] = useState(() => {
+        const stored = localStorage.getItem("user");
+        try { return stored ? JSON.parse(stored) : null; } catch { return null; }
+    });
 
+    // Keep localStorage in sync whenever user changes
     useEffect(() => {
-        const storedUser = localStorage.getItem("user");
-        if (storedUser) {
-            setUser(JSON.parse(storedUser));
-        }
-    }, []);
+        if (user) localStorage.setItem("user", JSON.stringify(user));
+    }, [user]);
 
     return (
         <AuthContext.Provider value={{ user, setUser }}>

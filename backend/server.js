@@ -45,11 +45,9 @@ io.on('connection', (socket) => {
 
   socket.on('user-online', async (userId) => {
     try {
-      const user = await User.findByIdAndUpdate(userId, { online: true }, { new: true });
-      if (user) {
-        onlineUsers[userId] = socket.id;
-        io.emit('update-user-status', Object.keys(onlineUsers));
-      }
+      onlineUsers[userId] = socket.id;
+      io.emit('update-user-status', Object.keys(onlineUsers));
+      await User.findByIdAndUpdate(userId, { online: true });
     } catch (err) {
       console.error('❌ Error setting user online:', err);
     }
