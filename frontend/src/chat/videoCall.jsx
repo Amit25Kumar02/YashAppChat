@@ -56,7 +56,9 @@ const VideoCall = () => {
     const [hasRemoteStream, setHasRemoteStream] = useState(false);
     const [swapped, setSwapped] = useState(false);
     const [facingMode, setFacingMode] = useState("user");
+    const [pipPos, setPipPos] = useState({ right: 20, bottom: 100 });
     const durationRef = useRef(null);
+    const dragRef = useRef(null);
 
     const { receiverId } = useParams();
     const [searchParams] = useSearchParams();
@@ -321,7 +323,47 @@ const VideoCall = () => {
                 className="vc-local"
                 autoPlay playsInline
                 muted={!swapped}
-                onClick={() => !swapped && setSwapped(true)}
+                style={{ right: pipPos.right, bottom: pipPos.bottom, left: "unset", top: "unset" }}
+                onClick={() => { if (!dragRef.current?.didDrag) setSwapped(p => !p); }}
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    const startX = e.clientX, startY = e.clientY;
+                    const startRight = pipPos.right, startBottom = pipPos.bottom;
+                    dragRef.current = { didDrag: false };
+                    const onMove = (me) => {
+                        const dx = me.clientX - startX, dy = me.clientY - startY;
+                        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragRef.current.didDrag = true;
+                        const newRight = Math.max(0, Math.min(window.innerWidth - 100, startRight - dx));
+                        const newBottom = Math.max(0, Math.min(window.innerHeight - 140, startBottom - dy));
+                        setPipPos({ right: newRight, bottom: newBottom });
+                    };
+                    const onUp = () => {
+                        window.removeEventListener("mousemove", onMove);
+                        window.removeEventListener("mouseup", onUp);
+                    };
+                    window.addEventListener("mousemove", onMove);
+                    window.addEventListener("mouseup", onUp);
+                }}
+                onTouchStart={(e) => {
+                    const t = e.touches[0];
+                    const startX = t.clientX, startY = t.clientY;
+                    const startRight = pipPos.right, startBottom = pipPos.bottom;
+                    dragRef.current = { didDrag: false };
+                    const onMove = (te) => {
+                        const tc = te.touches[0];
+                        const dx = tc.clientX - startX, dy = tc.clientY - startY;
+                        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragRef.current.didDrag = true;
+                        const newRight = Math.max(0, Math.min(window.innerWidth - 100, startRight - dx));
+                        const newBottom = Math.max(0, Math.min(window.innerHeight - 140, startBottom - dy));
+                        setPipPos({ right: newRight, bottom: newBottom });
+                    };
+                    const onUp = () => {
+                        window.removeEventListener("touchmove", onMove);
+                        window.removeEventListener("touchend", onUp);
+                    };
+                    window.addEventListener("touchmove", onMove, { passive: true });
+                    window.addEventListener("touchend", onUp);
+                }}
             />
 
             <div className="vc-controls">

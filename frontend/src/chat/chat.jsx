@@ -6,7 +6,7 @@ import AuthContext from "./authContext";
 import { socket } from "./socket";
 import axios from "axios";
 import EmojiPicker from "emoji-picker-react";
-import { FaSignOutAlt, FaVideo, FaSmile, FaArrowLeft, FaImage, FaPaperPlane, FaPhone, FaPhoneSlash, FaTrash, FaTimes, FaCamera, FaMicrophone, FaStop, FaUserPlus, FaUsers, FaCircle, FaFilm } from "react-icons/fa";
+import { FaSignOutAlt, FaVideo, FaSmile, FaArrowLeft, FaImage, FaPaperPlane, FaPhone, FaPhoneSlash, FaTrash, FaTimes, FaCamera, FaMicrophone, FaStop, FaUserPlus, FaUsers, FaCircle, FaFilm, FaEllipsisV, FaRegCircle, FaCommentDots } from "react-icons/fa";
 import { BiCheckDouble, BiCheck } from "react-icons/bi";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -96,14 +96,27 @@ const Chat = () => {
     const [fetchKey, setFetchKey] = useState(0);
     const [usersLoading, setUsersLoading] = useState(true);
     const [messagesLoading, setMessagesLoading] = useState(false);
-    const [showPeople, setShowPeople] = useState(false);
     const [peopleSearch, setPeopleSearch] = useState("");
     const [friendSearch, setFriendSearch] = useState("");
-    const [activeTab, setActiveTab] = useState("chats"); // "chats" | "status"
+    const [activeTab, setActiveTab] = useState("chats");
+    const [allCallLogs, setAllCallLogs] = useState([]);
+    const [showProfileModal, setShowProfileModal] = useState(false);
+    const [profileEditMode, setProfileEditMode] = useState(false);
+    const [profileDob, setProfileDob] = useState("");
+    const [profileTitle, setProfileTitle] = useState("");
+    const [showAttachMenu, setShowAttachMenu] = useState(false);
+    const [capturedPhoto, setCapturedPhoto] = useState(null);
+    const [capturedFile, setCapturedFile] = useState(null);
+    const [showCameraModal, setShowCameraModal] = useState(false);
+    const [cameraStream, setCameraStream] = useState(null);
+    const cameraInputRef = useRef(null);
+    const videoPreviewRef = useRef(null);
+    const canvasRef = useRef(null);
 
     // Message selection
     const [selectedMsgs, setSelectedMsgs] = useState(new Set());
     const [selectMode, setSelectMode] = useState(false);
+    const [showMenu, setShowMenu] = useState(false);
 
     const chatRef = useRef(null);
     const imageInputRef = useRef(null);
@@ -118,7 +131,10 @@ const Chat = () => {
         const token = localStorage.getItem("token");
         if (!token) { navigate("/"); return; }
         axios.get(`${APIURL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-            .then(res => setUserProfile(res.data))
+            .then(res => {
+                setUserProfile(res.data);
+                localStorage.setItem("myUserId", res.data._id);
+            })
             .catch(err => {
                 // Only logout on 401 (token invalid/expired), not on network errors
                 if (err.response?.status === 401) {
@@ -156,6 +172,7 @@ const Chat = () => {
             setAllUsers(prev => prev.map(u => u._id === by ? { ...u, ...newFriend } : u));
             setUserProfile(prev => ({ ...prev, friends: [...(prev.friends || []), by] }));
             toast.success(`${newFriend.username} accepted your friend request!`);
+            setActiveTab("chats");
         };
         const handleUnfriended = ({ by }) => {
             setUserProfile(prev => ({ ...prev, friends: (prev.friends || []).filter(id => String(id) !== String(by)) }));
@@ -315,6 +332,15 @@ const Chat = () => {
         }).catch(() => {}).finally(() => setUsersLoading(false));
     }, [userProfile._id]);
 
+    // Fetch call logs across all friends
+    useEffect(() => {
+        if (!userProfile._id || activeTab !== "calls") return;
+        axios.get(`${APIURL}/chat/calls`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+            params: { userId: userProfile._id }
+        }).then(res => setAllCallLogs(res.data)).catch(() => {});
+    }, [userProfile._id, activeTab]);
+
     const isFriend = (uid) => (userProfile.friends || []).map(String).includes(String(uid));
     const hasSentRequest = (uid) => (allUsers.find(u => u._id === uid)?.friendRequests || []).map(String).includes(String(userProfile._id));
 
@@ -343,6 +369,7 @@ const Chat = () => {
             }));
             setAllUsers(prev => prev.map(u => u._id === fromId ? { ...u, ...res.data.user, sentMeRequest: false } : u));
             toast.success("Friend added!");
+            setActiveTab("chats");
         } catch {
             toast.error("Failed to accept request");
         }
@@ -435,6 +462,26 @@ const Chat = () => {
             toast.success("Profile photo updated!");
         } catch {
             toast.error("Failed to update profile photo.");
+        }
+    };
+
+    const openProfileModal = () => {
+        setProfileDob(userProfile.dob || "");
+        setProfileTitle(userProfile.title || "");
+        setProfileEditMode(false);
+        setShowProfileModal(true);
+    };
+
+    const saveProfile = async () => {
+        try {
+            const res = await axios.put(`${APIURL}/auth/profile`, { dob: profileDob, title: profileTitle }, {
+                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+            });
+            setUserProfile(res.data);
+            setProfileEditMode(false);
+            toast.success("Profile updated!");
+        } catch {
+            toast.error("Failed to update profile.");
         }
     };
 
@@ -699,6 +746,80 @@ const Chat = () => {
     const longPressTimer = useRef(null);
     const longPressFired = useRef(false);
 
+    // Close menus on outside click
+    useEffect(() => {
+        const close = (e) => {
+            if (showMenu && !e.target.closest(".sidebar-menu-wrap")) setShowMenu(false);
+            if (showAttachMenu && !e.target.closest(".attach-wrap")) setShowAttachMenu(false);
+        };
+        document.addEventListener("mousedown", close);
+        return () => document.removeEventListener("mousedown", close);
+    }, [showMenu, showAttachMenu]);
+
+    const openCamera = async () => {
+        // Desktop only — mobile uses inline label input
+        setCapturedPhoto(null);
+        setCapturedFile(null);
+        setShowCameraModal(true);
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            setCameraStream(stream);
+            setTimeout(() => {
+                if (videoPreviewRef.current) videoPreviewRef.current.srcObject = stream;
+            }, 100);
+        } catch {
+            toast.error("Camera access denied.");
+            setShowCameraModal(false);
+        }
+    };
+
+    const capturePhoto = () => {
+        const video = videoPreviewRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas) return;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext("2d").drawImage(video, 0, 0);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+        stopCameraStream();
+        setCapturedPhoto(dataUrl);
+        // convert dataUrl to File
+        fetch(dataUrl).then(r => r.blob()).then(blob => {
+            setCapturedFile(new File([blob], "camera.jpg", { type: "image/jpeg" }));
+        });
+    };
+
+    const stopCameraStream = () => {
+        if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); setCameraStream(null); }
+    };
+
+    // Mobile native capture handler
+    const handleCameraCapture = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        e.target.value = "";
+        setCapturedPhoto(URL.createObjectURL(file));
+        setCapturedFile(file);
+    };
+
+    const sendCapturedPhoto = () => {
+        if (!capturedFile) return;
+        const preview = URL.createObjectURL(capturedFile);
+        setMediaFiles(prev => [...prev, { file: capturedFile, preview, type: "image" }]);
+        setImageFile(capturedFile);
+        setImagePreview(preview);
+        setCapturedPhoto(null);
+        setCapturedFile(null);
+        setShowCameraModal(false);
+    };
+
+    const closeCameraModal = () => {
+        stopCameraStream();
+        setCapturedPhoto(null);
+        setCapturedFile(null);
+        setShowCameraModal(false);
+    };
+
     // Stop recording on mouse/touch release anywhere
     useEffect(() => {
         const stop = () => { if (isRecording) stopRecording(); };
@@ -781,6 +902,137 @@ const Chat = () => {
                 </div>
             )}
 
+            {/* Profile Modal */}
+            {showProfileModal && (
+                <div className="call-modal-overlay" onClick={() => setShowProfileModal(false)}>
+                    <div className="profile-modal" onClick={e => e.stopPropagation()}>
+                        <div className="profile-modal-header">
+                            <span>{profileEditMode ? "Edit Profile" : "Profile"}</span>
+                            <button onClick={() => setShowProfileModal(false)}><FaTimes /></button>
+                        </div>
+
+                        {/* Avatar — always clickable to change photo */}
+                        <div className="profile-modal-avatar" onClick={() => avatarInputRef.current.click()}>
+                            <Avatar user={userProfile} />
+                            <div className="profile-modal-avatar-overlay"><FaCamera /></div>
+                        </div>
+
+                        {profileEditMode ? (
+                            <>
+                                <div className="profile-modal-name">{userProfile.username}</div>
+                                <div className="profile-modal-field">
+                                    <label>Title / Bio</label>
+                                    <input
+                                        className="profile-modal-input"
+                                        placeholder="e.g. Developer, Student..."
+                                        value={profileTitle}
+                                        onChange={e => setProfileTitle(e.target.value)}
+                                        maxLength={40}
+                                        autoFocus
+                                    />
+                                </div>
+                                <div className="profile-modal-field">
+                                    <label>Date of Birth</label>
+                                    <input
+                                        type="date"
+                                        className="profile-modal-input"
+                                        value={profileDob}
+                                        onChange={e => setProfileDob(e.target.value)}
+                                    />
+                                </div>
+                                <div className="profile-modal-edit-actions">
+                                    <button className="profile-modal-cancel" onClick={() => setProfileEditMode(false)}>Cancel</button>
+                                    <button className="profile-modal-save" onClick={saveProfile}>Update</button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="profile-view-name">{userProfile.username}</div>
+                                <div className="profile-view-row">
+                                    <span className="profile-view-label">Title</span>
+                                    <span className="profile-view-value">{userProfile.title || <span className="profile-view-empty">Not set</span>}</span>
+                                </div>
+                                <div className="profile-view-row">
+                                    <span className="profile-view-label">Date of Birth</span>
+                                    <span className="profile-view-value">{userProfile.dob ? new Date(userProfile.dob).toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" }) : <span className="profile-view-empty">Not set</span>}</span>
+                                </div>
+                                <button className="profile-modal-edit-btn" onClick={() => { setProfileDob(userProfile.dob || ""); setProfileTitle(userProfile.title || ""); setProfileEditMode(true); }}>
+                                    Edit Profile
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Camera Modal — live feed (desktop) or preview (both) */}
+            {showCameraModal && (
+                <div className="call-modal-overlay" onClick={closeCameraModal}>
+                    <div className="camera-modal" onClick={e => e.stopPropagation()}>
+                        <div className="camera-modal-header">
+                            <span>{capturedPhoto ? "Preview" : "Take Photo"}</span>
+                            <button onClick={closeCameraModal}><FaTimes /></button>
+                        </div>
+                        {capturedPhoto ? (
+                            <>
+                                <img src={capturedPhoto} alt="captured" className="camera-preview-img" />
+                                <div className="camera-modal-actions">
+                                    <button className="camera-btn camera-retake" onClick={() => { setCapturedPhoto(null); setCapturedFile(null); openCamera(); }}>Retake</button>
+                                    <button className="camera-btn camera-send" onClick={sendCapturedPhoto}><FaPaperPlane /> Send</button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <video ref={videoPreviewRef} autoPlay playsInline muted className="camera-live-video" />
+                                <canvas ref={canvasRef} style={{ display: "none" }} />
+                                <div className="camera-modal-actions">
+                                    <button className="camera-btn camera-capture" onClick={capturePhoto}><FaCamera /></button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+            {/* Mobile: native camera capture + preview */}
+            {!showCameraModal && capturedPhoto && (
+                <div className="call-modal-overlay" onClick={closeCameraModal}>
+                    <div className="camera-modal" onClick={e => e.stopPropagation()}>
+                        <div className="camera-modal-header">
+                            <span>Preview</span>
+                            <button onClick={closeCameraModal}><FaTimes /></button>
+                        </div>
+                        <img src={capturedPhoto} alt="captured" className="camera-preview-img" />
+                        <div className="camera-modal-actions">
+                            <button className="camera-btn camera-retake" onClick={() => { setCapturedPhoto(null); setCapturedFile(null); cameraInputRef.current?.click(); }}>Retake</button>
+                            <button className="camera-btn camera-send" onClick={sendCapturedPhoto}><FaPaperPlane /> Send</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Desktop vertical icon bar */}
+            <div className="desktop-icon-bar">
+                <button className={`desktop-icon-btn${activeTab === "chats" ? " dib-active" : ""}`} onClick={() => setActiveTab("chats")} title="Chats">
+                    <FaCommentDots />
+                </button>
+                <button className={`desktop-icon-btn${activeTab === "calls" ? " dib-active" : ""}`} onClick={() => setActiveTab("calls")} title="Calls">
+                    <FaPhone />
+                </button>
+                <button className={`desktop-icon-btn${activeTab === "status" ? " dib-active" : ""}`} onClick={() => setActiveTab("status")} title="Status">
+                    <FaRegCircle />
+                </button>
+                <button className={`desktop-icon-btn${activeTab === "people" ? " dib-active" : ""}`} onClick={() => setActiveTab("people")} title="People" style={{ position: "relative" }}>
+                    <FaUserPlus />
+                    {allUsers.filter(u => u.sentMeRequest).length > 0 && (
+                        <span className="req-notif-badge">{allUsers.filter(u => u.sentMeRequest).length}</span>
+                    )}
+                </button>
+                <div className="desktop-icon-spacer" />
+                {/* <button className="desktop-icon-btn desktop-icon-logout" onClick={handleLogout} title="Logout">
+                    <FaSignOutAlt />
+                </button> */}
+            </div>
+
             {/* Sidebar */}
             <aside className={`sidebar ${!showSidebar ? "sidebar-hidden" : ""}`}>
                 <div className="sidebar-header">
@@ -789,31 +1041,117 @@ const Chat = () => {
                             <Avatar user={userProfile} size="sm" />
                             <div className="profile-avatar-overlay"><FaCamera /></div>
                         </div>
+        <input type="file" accept="image/*" ref={cameraInputRef} style={{ display: "none" }} onChange={handleCameraCapture} />
                         <input type="file" accept="image/*" ref={avatarInputRef} style={{ display: "none" }} onChange={handleAvatarChange} />
-                        <span className="sidebar-username">{userProfile.username}</span>
+                        <div>
+                            <span className="sidebar-username" style={{ cursor: "pointer" }} onClick={openProfileModal}>{userProfile.username}</span>
+                            {userProfile.title && <div style={{ fontSize: 11, color: "#6c63ff", marginTop: 1 }}>{userProfile.title}</div>}
+                        </div>
                     </div>
-                    <div style={{ display: "flex", gap: 4 }}>
-                        <button className="icon-btn-flat" onClick={() => setActiveTab(t => t === "status" ? "chats" : "status")} title="Status" style={{ position: "relative" }}>
-                            <FaCircle style={{ fontSize: 16 }} />
+                    <div className="sidebar-menu-wrap">
+                        <button className="icon-btn-flat" onClick={(e) => { e.stopPropagation(); setShowMenu(p => !p); }} title="Menu">
+                            <FaEllipsisV />
                         </button>
-                        <button className="icon-btn-flat" onClick={() => setShowPeople(p => !p)} title="Add People" style={{ position: "relative" }}>
-                            <FaUserPlus />
-                            {allUsers.filter(u => u.sentMeRequest).length > 0 && (
-                                <span className="req-notif-badge">{allUsers.filter(u => u.sentMeRequest).length}</span>
-                            )}
-                        </button>
-                        <button className="icon-btn-flat" onClick={handleLogout} title="Logout">
-                            <FaSignOutAlt />
-                        </button>
+                        {showMenu && (
+                            <div className="sidebar-menu">
+                                <button className="sidebar-menu-item" onClick={() => { openProfileModal(); setShowMenu(false); }}>
+                                    <FaCamera /> Profile Details
+                                </button>
+                                <div className="sidebar-menu-divider" />
+                                <button className="sidebar-menu-item sidebar-menu-logout" onClick={handleLogout}>
+                                    <FaSignOutAlt /> Logout
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {/* Add People / Friend Requests Panel */}
-                {activeTab === "status" ? (
+                {activeTab === "chats" && (
+                    <div className="contact-list">
+                        <div className="friends-search-wrap">
+                            <input
+                                className="friends-search-input"
+                                placeholder="Search friends..."
+                                value={friendSearch}
+                                onChange={e => setFriendSearch(e.target.value)}
+                            />
+                        </div>
+                        {usersLoading ? (
+                            Array.from({ length: 5 }).map((_, i) => (
+                                <div key={i} className="contact-item" style={{ gap: 10, pointerEvents: "none" }}>
+                                    <ShimmerCircularImage size={42} />
+                                    <div style={{ flex: 1 }}><ShimmerText line={2} gap={8} /></div>
+                                </div>
+                            ))
+                        ) : allUsers.filter(u => isFriend(u._id) && u.username.toLowerCase().includes(friendSearch.toLowerCase())).map(u => {
+                            const unread = messages.filter(m => m.sender === u._id && !m.read).length;
+                            const lastMsg = messages.filter(m => m.sender === u._id || m.receiver === u._id).slice(-1)[0];
+                            return (
+                                <div key={u._id} className={`contact-item ${receiverId === u._id ? "active" : ""}`} onClick={() => handleSelectChat(u)}>
+                                    <div className="contact-avatar-wrap">
+                                        <Avatar user={u} />
+                                        {isOnline(u._id) && <span className="online-badge" />}
+                                    </div>
+                                    <div className="contact-info">
+                                        <div className="contact-top">
+                                            <span className="contact-name">{u.username}</span>
+                                            {lastMsg && <span className="contact-time">{formatTime(lastMsg.createdAt)}</span>}
+                                        </div>
+                                        <div className="contact-bottom">
+                                            <span className="contact-preview">
+                                                {lastMsg ? (lastMsg.type === "image" ? "📷 Photo" : lastMsg.type === "video" ? "🎥 Video" : lastMsg.type === "voice" ? "🎤 Voice" : lastMsg.type === "call" ? (lastMsg.content.includes("audio") || lastMsg.content.includes("📞") ? "📞 Audio call" : "📹 Video call") : lastMsg.content) : "No messages yet"}
+                                            </span>
+                                            {unread > 0 && <span className="unread-badge">{unread}</span>}
+                                        </div>
+                                    </div>
+                                    <button className="unfriend-btn" title="Unfriend" onClick={e => { e.stopPropagation(); unfriend(u._id); }}>✕</button>
+                                </div>
+                            );
+                        })}
+                        {!usersLoading && allUsers.filter(u => isFriend(u._id) && u.username.toLowerCase().includes(friendSearch.toLowerCase())).length === 0 && (
+                            <div className="no-friends-hint">
+                                <p>No friends yet.</p>
+                                <button className="req-btn req-add" onClick={() => setActiveTab("people")}><FaUserPlus /> Add People</button>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {activeTab === "calls" && (
+                    <div className="calls-panel">
+                        <div className="calls-panel-title"><FaPhone /> Recent Calls</div>
+                        {allCallLogs.length === 0 ? (
+                            <p className="calls-empty">No call history yet.</p>
+                        ) : allCallLogs.map((log, i) => {
+                            const isMe = log.sender === userProfile._id;
+                            const friendId = isMe ? log.receiver : log.sender;
+                            const friend = allUsers.find(u => u._id === friendId);
+                            const isMissed = log.content.includes("Missed") || log.content.includes("📵");
+                            const isVideo = log.content.includes("video") || log.content.includes("📹");
+                            return (
+                                <div key={log._id || i} className="call-log-item" onClick={() => { if (friend) handleSelectChat(friend); }}>
+                                    <div className="contact-avatar-wrap">
+                                        <Avatar user={friend || { username: "?" }} size="sm" />
+                                        {friend && isOnline(friend._id) && <span className="online-badge" />}
+                                    </div>
+                                    <div className="call-log-info">
+                                        <span className="call-log-name">{friend?.username || "Unknown"}</span>
+                                        <span className={`call-log-type${isMissed ? " missed" : ""}`}>
+                                            {isMissed ? "📵" : isVideo ? "📹" : "📞"} {isMissed ? (isMe ? "No answer" : "Missed call") : (isVideo ? "Video call" : "Audio call")}
+                                        </span>
+                                    </div>
+                                    <span className="call-log-time">{formatTime(log.createdAt)}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {activeTab === "status" && (
                     <StatusPanel userProfile={userProfile} onClose={() => setActiveTab("chats")} />
-                ) : (
-                <>
-                {showPeople && (
+                )}
+
+                {activeTab === "people" && (
                     <div className="people-panel">
                         <div className="people-panel-title"><FaUsers /> People</div>
                         <input
@@ -847,66 +1185,29 @@ const Chat = () => {
                     </div>
                 )}
 
-                <div className="contact-list">
-                    <div className="friends-search-wrap">
-                        <input
-                            className="friends-search-input"
-                            placeholder="Search friends..."
-                            value={friendSearch}
-                            onChange={e => setFriendSearch(e.target.value)}
-                        />
-                    </div>
-                    {usersLoading ? (
-                        Array.from({ length: 5 }).map((_, i) => (
-                            <div key={i} className="contact-item" style={{ gap: 10, pointerEvents: "none" }}>
-                                <ShimmerCircularImage size={42} />
-                                <div style={{ flex: 1 }}>
-                                    <ShimmerText line={2} gap={8} />
-                                </div>
-                            </div>
-                        ))
-                    ) : allUsers.filter(u => isFriend(u._id) && u.username.toLowerCase().includes(friendSearch.toLowerCase())).map(u => {
-                        const unread = messages.filter(m => m.sender === u._id && !m.read).length;
-                        const lastMsg = messages.filter(m => m.sender === u._id || m.receiver === u._id).slice(-1)[0];
-                        return (
-                            <div
-                                key={u._id}
-                                className={`contact-item ${receiverId === u._id ? "active" : ""}`}
-                                onClick={() => handleSelectChat(u)}
-                            >
-                                <div className="contact-avatar-wrap">
-                                    <Avatar user={u} />
-                                    {isOnline(u._id) && <span className="online-badge" />}
-                                </div>
-                                <div className="contact-info">
-                                    <div className="contact-top">
-                                        <span className="contact-name">{u.username}</span>
-                                        {lastMsg && <span className="contact-time">{formatTime(lastMsg.createdAt)}</span>}
-                                    </div>
-                                    <div className="contact-bottom">
-                                        <span className="contact-preview">
-                                            {lastMsg ? (lastMsg.type === "image" ? "📷 Photo" : lastMsg.type === "video" ? "🎥 Video" : lastMsg.type === "voice" ? "🎤 Voice" : lastMsg.type === "call" ? (lastMsg.content.includes("audio") || lastMsg.content.includes("📞") ? "📞 Audio call" : "📹 Video call") : lastMsg.content) : "No messages yet"}
-                                        </span>
-                                        {unread > 0 && <span className="unread-badge">{unread}</span>}
-                                    </div>
-                                </div>
-                                <button className="unfriend-btn" title="Unfriend" onClick={e => { e.stopPropagation(); unfriend(u._id); }}>✕</button>
-                            </div>
-                        );
-                    })}
-                    
-                    {!usersLoading && allUsers.filter(u => isFriend(u._id) && u.username.toLowerCase().includes(friendSearch.toLowerCase())).length === 0 && !showPeople && (
-                        <div className="no-friends-hint">
-                            <p>No friends yet.</p>
-                            <button className="req-btn req-add" onClick={() => setShowPeople(true)}><FaUserPlus /> Add People</button>
-                        </div>
-                    )}
-                </div>
-                </>
-                )}
-            </aside>
 
-            {/* Main Chat */}
+                {/* Mobile bottom bar */}
+                <div className="sidebar-bottom-bar">
+                    <button className={`sidebar-bottom-btn${activeTab === "chats" ? " sbb-active" : ""}`} onClick={() => setActiveTab("chats")}>
+                        <FaCommentDots /><span>Chats</span>
+                    </button>
+                    <button className={`sidebar-bottom-btn${activeTab === "calls" ? " sbb-active" : ""}`} onClick={() => setActiveTab("calls")}>
+                        <FaPhone /><span>Calls</span>
+                    </button>
+                    <button className={`sidebar-bottom-btn${activeTab === "status" ? " sbb-active" : ""}`} onClick={() => setActiveTab("status")}>
+                        <FaRegCircle /><span>Status</span>
+                    </button>
+                    <button className={`sidebar-bottom-btn${activeTab === "people" ? " sbb-active" : ""}`} onClick={() => setActiveTab("people")}>
+                        <span className="sbb-people-icon">
+                            <FaUserPlus />
+                            {allUsers.filter(u => u.sentMeRequest).length > 0 && (
+                                <span className="req-notif-badge sbb-badge">{allUsers.filter(u => u.sentMeRequest).length}</span>
+                            )}
+                        </span>
+                        <span>People</span>
+                    </button>
+                </div>
+            </aside>
             <main className={`chat-main ${showSidebar && window.innerWidth <= 768 ? "chat-hidden" : ""}`}>
                 {!receiverId ? (
                     <div className="empty-state">
@@ -1094,7 +1395,38 @@ const Chat = () => {
                                 ) : (
                                     <>
                                         <button className="icon-btn-flat" onClick={() => setShowEmojiPicker(p => !p)}><FaSmile /></button>
-                                        <button className="icon-btn-flat" onClick={() => imageInputRef.current.click()}><FaImage /></button>
+                                        <div className="attach-wrap">
+                                            <button className="icon-btn-flat" onClick={() => setShowAttachMenu(p => !p)} title="Attach"><FaEllipsisV /></button>
+                                            {showAttachMenu && (
+                                                <div className="attach-menu">
+                                                                    {/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? (
+                                                        <label className="attach-item" style={{ cursor: "pointer" }} onClick={() => setShowAttachMenu(false)}>
+                                                            <FaCamera /> Camera
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                capture="environment"
+                                                                style={{ display: "none" }}
+                                                                onChange={handleCameraCapture}
+                                                            />
+                                                        </label>
+                                                    ) : (
+                                                        <button className="attach-item" onClick={() => { setShowAttachMenu(false); openCamera(); }}>
+                                                            <FaCamera /> Camera
+                                                        </button>
+                                                    )}
+                                                    <button className="attach-item" onClick={() => { imageInputRef.current.setAttribute("accept", "image/*"); imageInputRef.current.click(); setShowAttachMenu(false); }}>
+                                                        <FaImage /> Image
+                                                    </button>
+                                                    <button className="attach-item" onClick={() => { imageInputRef.current.setAttribute("accept", "video/*"); imageInputRef.current.click(); setShowAttachMenu(false); }}>
+                                                        <FaFilm /> Video
+                                                    </button>
+                                                    <button className="attach-item" onClick={() => { imageInputRef.current.setAttribute("accept", "*/*"); imageInputRef.current.click(); setShowAttachMenu(false); }}>
+                                                        <FaPaperPlane /> Send File
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
                                         <input type="file" accept="image/*,video/*" multiple ref={imageInputRef} style={{ display: "none" }} onChange={handleImageSelect} />
                                         <input
                                             className="msg-input"
@@ -1125,3 +1457,4 @@ const Chat = () => {
 };
 
 export default Chat;
+

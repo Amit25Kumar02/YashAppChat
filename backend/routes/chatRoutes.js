@@ -76,6 +76,27 @@ router.post("/upload", (req, res) => {
   });
 });
 
+// Get all call logs for a user
+router.get("/calls", async (req, res) => {
+  const userId = req.query.userId || req.headers["x-user-id"];
+  const token = req.headers.authorization?.split(" ")[1];
+  // decode userId from token if not in query
+  let uid = userId;
+  if (!uid && token) {
+    try { const jwt = require("jsonwebtoken"); const d = jwt.verify(token, process.env.JWT_SECRET); uid = d.id || d._id; } catch {}
+  }
+  if (!uid) return res.status(400).json({ message: "userId required" });
+  try {
+    const logs = await Message.find({
+      type: "call",
+      $or: [{ sender: uid }, { receiver: uid }],
+    }).sort({ createdAt: -1 }).limit(100);
+    res.json(logs);
+  } catch (e) {
+    res.status(500).json({ message: "Error fetching call logs", error: e });
+  }
+});
+
 // Send a message
 router.post("/send", async (req, res) => {
   const { sender, receiver, content, type } = req.body;

@@ -174,6 +174,19 @@ app.post("/friend-reject", async (req, res) => {
     }
 });
 
+// Update profile (dob, title)
+app.put("/profile", async (req, res) => {
+    try {
+        const token = req.headers.authorization.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const { dob, title } = req.body;
+        const user = await User.findByIdAndUpdate(decoded.id, { dob, title }, { new: true }).select("-password");
+        const io = req.app.get("io");
+        if (io) io.emit("user-updated", { _id: user._id, username: user.username, avatar: user.avatar, dob: user.dob, title: user.title });
+        res.json(user);
+    } catch { res.status(500).json({ message: "Server error" }); }
+});
+
 // Unfriend
 app.post("/unfriend", async (req, res) => {
     try {

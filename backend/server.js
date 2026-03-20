@@ -182,3 +182,37 @@ io.on('connection', (socket) => {
 server.listen(process.env.PORT || 4000, () => {
   console.log(`🚀 Server running on port ${process.env.PORT || 4000}`);
 });
+
+// ── Birthday wish cron (runs daily at 8:00 AM) ──
+const checkBirthdays = async () => {
+  try {
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const todayMD = `${mm}-${dd}`;
+    const users = await User.find({ dob: { $regex: `-${mm}-${dd}$` } }).populate("friends", "_id");
+    for (const birthdayUser of users) {
+      for (const friend of birthdayUser.friends) {
+        const msg = await Message.create({
+          sender: friend._id,
+          receiver: birthdayUser._id,
+          content: `🎂 Happy Birthday, ${birthdayUser.username}! 🎉 Wishing you a wonderful day!`,
+          type: "text",
+        });
+        // Notify the birthday person
+        const birthdaySocket = onlineUsers[String(birthdayUser._id)];
+        if (birthdaySocket) io.to(birthdaySocket).emit("receiveMessage", msg);
+        // Also notify the friend so it appears in their chat too
+        const friendSocket = onlineUsers[String(friend._id)];
+        if (friendSocket) io.to(friendSocket).emit("receiveMessage", msg);
+      }
+    }
+    console.log(`🎂 Birthday check done: ${users.length} birthdays today`);
+  } catch (err) {
+    console.error("Birthday cron error:", err);
+  }
+};
+
+// Run at startup and then every 24h
+checkBirthdays();
+setInterval(checkBirthdays, 24 * 60 * 60 * 1000);

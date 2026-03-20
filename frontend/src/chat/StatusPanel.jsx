@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import { FaTimes, FaPlus, FaEye, FaTrash, FaImage, FaFont } from "react-icons/fa";
+import { FaTimes, FaPlus, FaEye, FaTrash, FaImage, FaFont, FaVideo } from "react-icons/fa";
 import { socket } from "./socket";
 import "./css/status.css";
 
@@ -45,11 +45,16 @@ const StatusPanel = ({ userProfile, onClose }) => {
     const [bgColor, setBgColor] = useState(BG_COLORS[0]);
     const [imageFile, setImageFile] = useState(null);
     const [imagePreview, setImagePreview] = useState(null);
+    const [videoFile, setVideoFile] = useState(null);
+    const [videoPreview, setVideoPreview] = useState(null);
     const [caption, setCaption] = useState("");
     const [posting, setPosting] = useState(false);
     const imageInputRef = useRef(null);
+    const videoInputRef = useRef(null);
     const progressRef = useRef(null);
     const autoAdvanceRef = useRef(null);
+    const progressIntervalRef = useRef(null);
+    const [progressWidth, setProgressWidth] = useState(0);
 
     const token = localStorage.getItem("token");
     const headers = { Authorization: `Bearer ${token}` };
@@ -94,10 +99,11 @@ const StatusPanel = ({ userProfile, onClose }) => {
         }
     };
 
-    const closeViewer = () => { setViewing(null); clearTimeout(autoAdvanceRef.current); };
+    const closeViewer = () => { setViewing(null); clearTimeout(autoAdvanceRef.current); clearInterval(progressIntervalRef.current); };
 
     const goNext = () => {
         clearTimeout(autoAdvanceRef.current);
+        clearInterval(progressIntervalRef.current);
         if (viewingIdx < viewing.items.length - 1) {
             const nextIdx = viewingIdx + 1;
             setViewingIdx(nextIdx);
@@ -108,6 +114,7 @@ const StatusPanel = ({ userProfile, onClose }) => {
 
     const goPrev = () => {
         clearTimeout(autoAdvanceRef.current);
+        clearInterval(progressIntervalRef.current);
         if (viewingIdx > 0) { setViewingIdx(i => i - 1); setShowSeenBy(false); }
     };
 
@@ -121,12 +128,27 @@ const StatusPanel = ({ userProfile, onClose }) => {
         }
     };
 
-    // Auto-advance after 5s
+    // Auto-advance after 30s with real progress
     useEffect(() => {
         if (!viewing) return;
         clearTimeout(autoAdvanceRef.current);
-        autoAdvanceRef.current = setTimeout(goNext, 5000);
-        return () => clearTimeout(autoAdvanceRef.current);
+        clearInterval(progressIntervalRef.current);
+        setProgressWidth(0);
+        const DURATION = 30000;
+        const TICK = 100;
+        let elapsed = 0;
+        progressIntervalRef.current = setInterval(() => {
+            elapsed += TICK;
+            setProgressWidth(Math.min(100, (elapsed / DURATION) * 100));
+            if (elapsed >= DURATION) {
+                clearInterval(progressIntervalRef.current);
+                goNext();
+            }
+        }, TICK);
+        return () => {
+            clearTimeout(autoAdvanceRef.current);
+            clearInterval(progressIntervalRef.current);
+        };
     }, [viewing, viewingIdx]);
 
     const deleteStatus = async (id) => {
@@ -148,6 +170,12 @@ const StatusPanel = ({ userProfile, onClose }) => {
             if (composeType === "text") {
                 if (!textContent.trim()) return;
                 await axios.post(`${APIURL}/status/text`, { content: textContent, bgColor }, { headers });
+            } else if (composeType === "video") {
+                if (!videoFile) return;
+                const fd = new FormData();
+                fd.append("video", videoFile);
+                fd.append("caption", caption);
+                await axios.post(`${APIURL}/status/video`, fd, { headers });
             } else {
                 if (!imageFile) return;
                 const fd = new FormData();
@@ -157,7 +185,8 @@ const StatusPanel = ({ userProfile, onClose }) => {
             }
             await fetchStatuses();
             setShowCompose(false);
-            setTextContent(""); setImageFile(null); setImagePreview(null); setCaption("");
+            setTextContent(""); setImageFile(null); setImagePreview(null);
+            setVideoFile(null); setVideoPreview(null); setCaption("");
         } catch {}
         setPosting(false);
     };
@@ -166,9 +195,15 @@ const StatusPanel = ({ userProfile, onClose }) => {
         const file = e.target.files[0];
         if (!file) return;
         setImageFile(file);
-        const reader = new FileReader();
-        reader.onload = ev => setImagePreview(ev.target.result);
-        reader.readAsDataURL(file);
+        setImagePreview(URL.createObjectURL(file));
+        e.target.value = "";
+    };
+
+    const handleVideoPick = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setVideoFile(file);
+        setVideoPreview(URL.createObjectURL(file));
         e.target.value = "";
     };
 
@@ -230,6 +265,7 @@ const StatusPanel = ({ userProfile, onClose }) => {
                         <div className="st-compose-tabs">
                             <button className={composeType === "text" ? "active" : ""} onClick={() => setComposeType("text")}><FaFont /> Text</button>
                             <button className={composeType === "image" ? "active" : ""} onClick={() => setComposeType("image")}><FaImage /> Image</button>
+                            <button className={composeType === "video" ? "active" : ""} onClick={() => setComposeType("video")}><FaVideo /> Video</button>
                         </div>
                         {composeType === "text" ? (
                             <div className="st-text-compose" style={{ background: bgColor }}>
@@ -245,6 +281,17 @@ const StatusPanel = ({ userProfile, onClose }) => {
                                         <button key={c} className={`st-bg-swatch ${bgColor === c ? "selected" : ""}`} style={{ background: c }} onClick={() => setBgColor(c)} />
                                     ))}
                                 </div>
+                            </div>
+                        ) : composeType === "video" ? (
+                            <div className="st-image-compose">
+                                {videoPreview
+                                    ? <video src={videoPreview} className="st-img-preview" controls style={{ maxHeight: 200, width: "100%", borderRadius: 12 }} />
+                                    : <button className="st-img-pick-btn" onClick={() => videoInputRef.current.click()}><FaVideo /> Pick Video</button>
+                                }
+                                <input type="file" accept="video/*" ref={videoInputRef} style={{ display: "none" }} onChange={handleVideoPick} />
+                                {videoPreview && (
+                                    <input className="st-caption-input" placeholder="Add a caption..." value={caption} onChange={e => setCaption(e.target.value)} />
+                                )}
                             </div>
                         ) : (
                             <div className="st-image-compose">
@@ -272,7 +319,10 @@ const StatusPanel = ({ userProfile, onClose }) => {
                     <div className="st-progress-bars">
                         {viewing.items.map((s, i) => (
                             <div key={s._id} className="st-progress-track">
-                                <div className="st-progress-fill" style={{ width: i < viewingIdx ? "100%" : i === viewingIdx ? "100%" : "0%", transition: i === viewingIdx ? "width 5s linear" : "none" }} />
+                                <div className="st-progress-fill" style={{
+                                    width: i < viewingIdx ? "100%" : i === viewingIdx ? `${progressWidth}%` : "0%",
+                                    transition: i === viewingIdx ? "none" : "none"
+                                }} />
                             </div>
                         ))}
                     </div>
@@ -300,6 +350,11 @@ const StatusPanel = ({ userProfile, onClose }) => {
                         {currentStatus.type === "text" ? (
                             <div className="st-viewer-text" style={{ background: currentStatus.bgColor }}>
                                 <p>{currentStatus.content}</p>
+                            </div>
+                        ) : currentStatus.type === "video" ? (
+                            <div className="st-viewer-image" onClick={e => e.stopPropagation()}>
+                                <video src={currentStatus.content} controls autoPlay style={{ maxWidth: "100%", maxHeight: "85vh", borderRadius: 8 }} />
+                                {currentStatus.caption && <p className="st-viewer-caption">{currentStatus.caption}</p>}
                             </div>
                         ) : (
                             <div className="st-viewer-image">

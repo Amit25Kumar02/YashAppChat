@@ -7,6 +7,8 @@ const userSchema = new mongoose.Schema({
     password: { type: String, required: true },
     online: { type: Boolean, default: false },
     avatar: { type: String, default: "" },
+    dob: { type: String, default: "" },
+    title: { type: String, default: "" },
     friends: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     friendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }]
 });

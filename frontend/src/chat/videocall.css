@@ -21,8 +21,6 @@
 /* ===== LOCAL VIDEO (PiP) ===== */
 .vc-local {
     position: absolute;
-    bottom: 100px;
-    right: 20px;
     width: 130px;
     height: 180px;
     object-fit: cover;
@@ -31,18 +29,17 @@
     box-shadow: 0 8px 24px rgba(0,0,0,0.5);
     z-index: 10;
     background: #1a1a2e;
-    cursor: pointer;
-    transition: transform 0.15s;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
 }
 
-.vc-local:hover { transform: scale(1.04); }
+.vc-local:active { cursor: grabbing; }
 
 @media (max-width: 768px) {
     .vc-local {
         width: 90px;
         height: 130px;
-        bottom: 90px;
-        right: 12px;
     }
 }
 
@@ -142,3 +139,26 @@
 }
 
 .vc-btn-end:hover { background: #dc2626; }
+
+@media (max-width: 768px) {
+    .vc-controls {
+        bottom: 24px;
+        gap: 14px;
+        padding: 10px 20px;
+        width: calc(100% - 32px);
+        justify-content: center;
+        border-radius: 40px;
+    }
+
+    .vc-btn {
+        width: 48px;
+        height: 48px;
+        font-size: 18px;
+    }
+
+    .vc-btn-end {
+        width: 54px;
+        height: 54px;
+        font-size: 20px;
+    }
+}

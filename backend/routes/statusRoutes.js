@@ -18,11 +18,12 @@ const storage = new CloudinaryStorage({
     cloudinary,
     params: async (req, file) => ({
         folder: "yashapp/statuses",
-        allowed_formats: ["jpg", "jpeg", "png", "webp"],
+        allowed_formats: ["jpg", "jpeg", "png", "webp", "mp4", "mov", "webm"],
+        resource_type: file.mimetype.startsWith("video/") ? "video" : "image",
         public_id: Date.now() + "-" + file.originalname.split(".")[0],
     }),
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 const auth = (req) => {
     const token = req.headers.authorization?.split(" ")[1];
@@ -37,6 +38,27 @@ app.post("/text", async (req, res) => {
         const { content, bgColor } = req.body;
         if (!content?.trim()) return res.status(400).json({ message: "Content required" });
         const status = await Status.create({ user: decoded.id, type: "text", content: content.trim(), bgColor: bgColor || "#1e1e2e" });
+        const populated = await status.populate("user", "username avatar");
+        const io = req.app.get("io");
+        const me = await User.findById(decoded.id).select("friends");
+        if (io) {
+            const onlineUsers = req.app.get("onlineUsers");
+            (me.friends || []).forEach(fid => {
+                const sid = onlineUsers[String(fid)];
+                if (sid) io.to(sid).emit("new-status", populated);
+            });
+        }
+        res.json(populated);
+    } catch { res.status(500).json({ message: "Server error" }); }
+});
+
+// Post video status
+app.post("/video", upload.single("video"), async (req, res) => {
+    try {
+        const decoded = auth(req);
+        if (!req.file) return res.status(400).json({ message: "No video uploaded" });
+        const videoUrl = req.file.path;
+        const status = await Status.create({ user: decoded.id, type: "video", content: videoUrl, caption: req.body.caption || "" });
         const populated = await status.populate("user", "username avatar");
         const io = req.app.get("io");
         const me = await User.findById(decoded.id).select("friends");

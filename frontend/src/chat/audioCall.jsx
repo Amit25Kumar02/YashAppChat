@@ -46,7 +46,7 @@ const AudioCall = () => {
     const localStreamRef = useRef(null);
     const pendingCandidates = useRef([]);
     const durationRef = useRef(null);
-    const remoteAudioRef = useRef(null);
+    const remoteAudioRef = useRef(new Audio());
 
     const [callEstablished, setCallEstablished] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
@@ -68,7 +68,6 @@ const AudioCall = () => {
         const pc = new RTCPeerConnection(ICE_SERVERS);
         pc.ontrack = (e) => {
             if (e.streams && e.streams[0]) {
-                if (!remoteAudioRef.current) remoteAudioRef.current = new Audio();
                 remoteAudioRef.current.srcObject = e.streams[0];
                 remoteAudioRef.current.play().catch(() => {});
                 setCallEstablished(true);
@@ -103,9 +102,9 @@ const AudioCall = () => {
     const cleanup = (notify = true) => {
         clearInterval(durationRef.current);
         if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = null;
-            remoteAudioRef.current = null;
-        }
+                remoteAudioRef.current.pause();
+                remoteAudioRef.current.srcObject = null;
+            }
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach(t => t.stop());
             localStreamRef.current = null;
@@ -162,7 +161,6 @@ const AudioCall = () => {
                 await getPC().setRemoteDescription(new RTCSessionDescription(sdp));
                 for (const c of pendingCandidates.current) await getPC().addIceCandidate(new RTCIceCandidate(c));
                 pendingCandidates.current = [];
-                setCallEstablished(true);
             } catch (err) {
                 console.error("Error handling audio answer:", err);
             }
