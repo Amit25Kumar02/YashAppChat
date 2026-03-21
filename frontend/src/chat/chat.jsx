@@ -167,7 +167,7 @@ const Chat = () => {
         const handleFriendRequest = ({ from }) => {
             setAllUsers(prev => prev.map(u => u._id === from ? { ...u, sentMeRequest: true } : u));
             requestAudio.current.currentTime = 0;
-            requestAudio.current.play().catch(() => {});
+            requestAudio.current.play().catch(() => { });
             toast.info("You have a new friend request!");
         };
         const handleFriendAccepted = ({ by, user: newFriend }) => {
@@ -211,7 +211,7 @@ const Chat = () => {
         socket.on("audio-call-invitation", ({ from, name }) => {
             setAudioCallData({ callerId: from, callerName: name });
             ringingAudio.current.loop = true;
-            ringingAudio.current.play().catch(() => {});
+            ringingAudio.current.play().catch(() => { });
         });
 
         socket.on("audio-call-accepted", () => {
@@ -231,7 +231,7 @@ const Chat = () => {
         socket.on("call-invitation", ({ from, name }) => {
             setVideoCallData({ callerId: from, callerName: name });
             ringingAudio.current.loop = true;
-            ringingAudio.current.play().catch(() => {});
+            ringingAudio.current.play().catch(() => { });
         });
 
         socket.on("call-cancelled", () => {
@@ -341,7 +341,7 @@ const Chat = () => {
                 const found = withFlags.find(u => u._id === savedId);
                 if (found) setReceiverUser(found);
             }
-        }).catch(() => {}).finally(() => setUsersLoading(false));
+        }).catch(() => { }).finally(() => setUsersLoading(false));
     }, [userProfile._id]);
 
     // Fetch call logs across all friends
@@ -350,7 +350,7 @@ const Chat = () => {
         axios.get(`${APIURL}/chat/calls`, {
             headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
             params: { userId: userProfile._id }
-        }).then(res => setAllCallLogs(res.data)).catch(() => {});
+        }).then(res => setAllCallLogs(res.data)).catch(() => { });
     }, [userProfile._id, activeTab]);
 
     const isFriend = (uid) => (userProfile.friends || []).map(String).includes(String(uid));
@@ -735,7 +735,7 @@ const Chat = () => {
         if (!window.confirm(`Start a video call with ${receiverName}?\n\nThis app uses your camera & microphone only for this call.`)) return;
         setIsCalling(true);
         callingAudio.current.loop = true;
-        callingAudio.current.play().catch(() => {});
+        callingAudio.current.play().catch(() => { });
         socket.emit("call-invitation", { to: receiverId, from: userProfile._id, name: userProfile.username });
     };
 
@@ -780,7 +780,7 @@ const Chat = () => {
         if (!window.confirm(`Start an audio call with ${receiverName}?\n\nThis app uses your microphone only for this call.`)) return;
         setIsAudioCalling(true);
         callingAudio.current.loop = true;
-        callingAudio.current.play().catch(() => {});
+        callingAudio.current.play().catch(() => { });
         socket.emit("audio-call-invitation", { to: receiverId, from: userProfile._id, name: userProfile.username });
     };
 
@@ -885,14 +885,36 @@ const Chat = () => {
         setCapturedFile(file);
     };
 
-    const sendCapturedPhoto = () => {
-        if (!capturedFile) return;
-        setMediaFiles(prev => [...prev, { file: capturedFile, preview: capturedPhoto, type: "image" }]);
-        setImageFile(capturedFile);
-        setImagePreview(capturedPhoto);
+    const sendCapturedPhoto = async (fileArg, previewArg) => {
+        const file = fileArg || capturedFile;
+        const preview = previewArg || capturedPhoto;
+        if (!file) return;
+        const toId = receiverId || localStorage.getItem("lastReceiverId");
+        const myId = userProfile._id || localStorage.getItem("myUserId");
+        if (!toId || !myId) { toast.error("No chat selected."); return; }
         setCapturedPhoto(null);
         setCapturedFile(null);
         setShowCameraModal(false);
+        setShowAttachMenu(false);
+        const tempId = generateTempId();
+        setMessages(prev => [...prev, { _id: tempId, sender: myId, receiver: toId, content: preview, type: "image", createdAt: new Date().toISOString() }]);
+        try {
+            const formData = new FormData();
+            formData.append("files", file);
+            const uploadRes = await axios.post(`${APIURL}/chat/upload`, formData, {
+                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+            });
+            const { url, type } = uploadRes.data.files[0];
+            const res = await axios.post(`${APIURL}/chat/send`,
+                { sender: myId, receiver: toId, content: url, type },
+                { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
+            );
+            setMessages(prev => prev.map(m => m._id === tempId ? res.data : m));
+            socket.emit("sendMessage", res.data);
+        } catch {
+            toast.error("Failed to send photo.");
+            setMessages(prev => prev.filter(m => m._id !== tempId));
+        }
     };
 
     const closeCameraModal = () => {
@@ -1085,7 +1107,7 @@ const Chat = () => {
                                 <img src={capturedPhoto} alt="captured" className="camera-preview-img" />
                                 <div className="camera-modal-actions">
                                     <button className="camera-btn camera-retake" onClick={() => { setCapturedPhoto(null); setCapturedFile(null); openCamera(); }}>Retake</button>
-                                    <button className="camera-btn camera-send" onClick={sendCapturedPhoto}><FaPaperPlane /> Send</button>
+                                    <button className="camera-btn camera-send" onClick={() => sendCapturedPhoto(capturedFile, capturedPhoto)}><FaPaperPlane /> Send</button>
                                 </div>
                             </>
                         ) : (
@@ -1111,7 +1133,7 @@ const Chat = () => {
                         <img src={capturedPhoto} alt="captured" className="camera-preview-img" />
                         <div className="camera-modal-actions">
                             <button className="camera-btn camera-retake" onClick={() => { setCapturedPhoto(null); setCapturedFile(null); }}>Retake</button>
-                            <button className="camera-btn camera-send" onClick={sendCapturedPhoto}><FaPaperPlane /> Send</button>
+                            <button className="camera-btn camera-send" onClick={() => sendCapturedPhoto(capturedFile, capturedPhoto)}><FaPaperPlane /> Send</button>
                         </div>
                     </div>
                 </div>
@@ -1148,7 +1170,7 @@ const Chat = () => {
                             <Avatar user={userProfile} size="sm" />
                             <div className="profile-avatar-overlay"><FaCamera /></div>
                         </div>
-        <input type="file" accept="image/*" ref={cameraInputRef} style={{ display: "none" }} onChange={handleCameraCapture} />
+                        <input type="file" accept="image/*" ref={cameraInputRef} style={{ display: "none" }} onChange={handleCameraCapture} />
                         <input type="file" accept="image/*" ref={avatarInputRef} style={{ display: "none" }} onChange={handleAvatarChange} />
                         <div>
                             <span className="sidebar-username" style={{ cursor: "pointer" }} onClick={openProfileModal}>{userProfile.username}</span>
@@ -1532,7 +1554,7 @@ const Chat = () => {
                                             <button className="icon-btn-flat" onClick={() => setShowAttachMenu(p => !p)} title="Attach"><FaEllipsisV /></button>
                                             {showAttachMenu && (
                                                 <div className="attach-menu">
-                                                                    {/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? (
+                                                    {/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? (
                                                         <label className="attach-item" style={{ cursor: "pointer" }} onClick={() => setShowAttachMenu(false)}>
                                                             <FaCamera /> Camera
                                                             <input

@@ -61,6 +61,7 @@ const VideoCall = () => {
     const durationRef = useRef(null);
     const dragRef = useRef(null);
     const lastTapRef = useRef(0);
+    const tapTimeoutRef = useRef(null);
 
     const { receiverId } = useParams();
     const [searchParams] = useSearchParams();
@@ -147,6 +148,16 @@ const VideoCall = () => {
         }
         if (notify) socket.emit("call-ended", { to: receiverId });
     };
+
+    useEffect(() => {
+        // Block browser back button during call
+        window.history.pushState(null, "", window.location.href);
+        const handlePopState = () => {
+            window.history.pushState(null, "", window.location.href);
+        };
+        window.addEventListener("popstate", handlePopState);
+        return () => window.removeEventListener("popstate", handlePopState);
+    }, []);
 
     useEffect(() => {
         let mounted = true;
@@ -254,12 +265,19 @@ const VideoCall = () => {
 
     const handleTap = () => {
         const now = Date.now();
-        if (now - lastTapRef.current < 300) {
+        const DOUBLE_TAP_DELAY = 300;
+        navigator.vibrate?.(10);
+        if (lastTapRef.current && (now - lastTapRef.current < DOUBLE_TAP_DELAY)) {
+            clearTimeout(tapTimeoutRef.current);
+            lastTapRef.current = 0;
             setSwapped(prev => !prev);
         } else {
-            setShowControls(prev => !prev);
+            lastTapRef.current = now;
+            tapTimeoutRef.current = setTimeout(() => {
+                setShowControls(prev => !prev);
+                lastTapRef.current = 0;
+            }, DOUBLE_TAP_DELAY);
         }
-        lastTapRef.current = now;
     };
 
     const formatDuration = (s) => {
@@ -314,7 +332,7 @@ const VideoCall = () => {
                 className="vc-remote"
                 autoPlay playsInline
                 muted={swapped}
-                onClick={handleTap}
+                onClick={() => setShowControls(prev => !prev)}
             />
 
             {!hasRemoteStream && (

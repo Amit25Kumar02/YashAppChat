@@ -120,6 +120,16 @@ const AudioCall = () => {
     };
 
     useEffect(() => {
+        // Block browser back button during call
+        window.history.pushState(null, "", window.location.href);
+        const handlePopState = (e) => {
+            window.history.pushState(null, "", window.location.href);
+        };
+        window.addEventListener("popstate", handlePopState);
+        return () => window.removeEventListener("popstate", handlePopState);
+    }, []);
+
+    useEffect(() => {
         let mounted = true;
 
         // Re-register socket so onlineUsers map is fresh on this page
